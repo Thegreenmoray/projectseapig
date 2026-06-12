@@ -8,18 +8,18 @@ type TestRunner interface {
 	RunTest(testName string) (error, TestResult)
 }
 
-type Flaky struct {
-	Seriesoftests         []TestResult //would love to call this marine snow, but would be too confusing
-	Oringialamountoftests int
-	Flakynessrate         float64
-	PassCount             int
-	FailCount             int
+type Pig struct {
+	Run           []TestResult //would love to call this marine snow, but would be too confusing
+	Flakynessrate float64
+	PassCount     int
+	FailCount     int
 }
 
 type TestResult struct {
 	Testname  string
 	Passed    bool
 	Timetaken time.Duration
+	Timestamp time.Time
 	Exitcode  int
 	Stdout    string
 	Stderr    string
