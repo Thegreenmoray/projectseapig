@@ -23,6 +23,7 @@ type TestResult struct {
 	Exitcode  int
 	Stdout    string
 	Stderr    string
+	Metadata  map[string]string //this stores any errors,callbacks, or panics from the test langugaes
 	//others later
 
 }

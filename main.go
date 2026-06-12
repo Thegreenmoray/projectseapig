@@ -1,7 +1,11 @@
+/*
+Copyright © 2026 NAME HERE <EMAIL ADDRESS>
+
+*/
 package main
 
-import "fmt"
+import "github.com/Justi/projectseapig/cmd"
 
 func main() {
-	fmt.Println("Sea Pig initialized.")
+	cmd.Execute()
 }
