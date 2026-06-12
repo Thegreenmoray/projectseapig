@@ -1,9 +1,71 @@
-Project Sea Pig or just Sea Pig, 
-will be a language angostic tool designed to detect flaky
-tests, saving devlopers time and money determining
-if wether or not their CI piplines are broken.
+🐷 Sea Pig: 
+A tool for developers to detect flaky unit tests, Flaky tests refers to tests that produce nondeterministic results for the same input. Flaky tests waste time and money, cause developer frustration, and cause uncertainty in testing. Sea Pig detects flaky tests before hitting CI
 
-Current supported languages: Java, Python, JS, Go
 
-Future support(earliest → latest):  Kotlin, TS, Ruby, PHP,
-C#/.NET,Swift,Dart/Flutter,Rust,C family
+⭐Why Sea Pig:
+
+
+Most other flake detectors are
+* closed source
+* Paid Saas
+* Attached to CI pipelines
+* one language only
+
+
+Sea pig is:
+
+
+* Language agnostic
+* Local-first
+* Open-Source
+* Simple and for developers
+
+
+🧪 How it works:
+Sea pig will run unit tests with the same input multiple times to detect nondeterminism. If flakiness is detected (tests sometimes pass, but other times fail) sea pig flags it and points to what tests are flaky.
+
+
+🔧 Current planned support (v1.0)
+Go
+
+
+Python
+
+
+Java
+
+
+JavaScript
+
+
+🚀 Future language support (earliest → latest)
+Kotlin
+
+
+TypeScript
+
+
+Ruby
+
+
+PHP
+
+
+C# / .NET
+
+
+Swift
+
+
+Dart / Flutter
+
+
+Rust
+
+
+C / C++
+
+
+📌 Project Status
+Sea Pig is currently in early development.
+More updates, documentation, and examples will be added as the project evolves.
