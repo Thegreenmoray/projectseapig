@@ -5,7 +5,7 @@ import "time"
 type TestRunner interface {
 	Detect(projectPath string) bool
 	ListTests(projectPath string) ([]string, error)
-	RunTest(testName string) (error, TestResult)
+	RunTest(testName string) (TestResult, error)
 }
 
 type Pig struct {
