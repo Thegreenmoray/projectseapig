@@ -8,14 +8,17 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/Justi/projectseapig/factory"
+	"github.com/Justi/projectseapig/runners"
 	"github.com/spf13/cobra"
 )
 
 var n int
 var l string
 var deep bool
+var wg sync.WaitGroup
 
 // pigCmd represents the pig command
 var pigCmd = &cobra.Command{
@@ -33,6 +36,10 @@ var pigCmd = &cobra.Command{
 			return
 		}
 
+		if n <= 0 {
+			fmt.Printf("%x is too small, try a bigger number", n)
+			return
+		}
 		input = strings.TrimSpace(strings.ToLower(input))
 		if !(input == "y" || input == "yes") {
 			fmt.Println("user cancelled process")
@@ -45,8 +52,27 @@ var pigCmd = &cobra.Command{
 			n = 100
 		}
 
+		c := make(chan runners.TestResult)
+
 		for i := 0; i < n; i++ {
-			factory.Pigtype(l)
+			pigg, err := factory.Pigtype(l)
+			if err != nil {
+				continue
+			}
+			wg.Add(1)
+			go clump(pigg, c, &wg)
+
+		}
+
+		go func() {
+			wg.Wait()
+			close(c)
+		}()
+		for f := range c {
+			fmt.Printf("Test Name: %s\n", f.Testname)
+			fmt.Printf("Passed: %t\n", f.Passed)
+			fmt.Printf("Output: %s\n", f.Stdout)
+
 		}
 
 	},

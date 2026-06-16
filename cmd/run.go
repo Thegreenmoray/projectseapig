@@ -5,8 +5,10 @@ package cmd
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/Justi/projectseapig/factory"
+	"github.com/Justi/projectseapig/runners"
 	"github.com/spf13/cobra"
 )
 
@@ -26,11 +28,40 @@ var runCmd = &cobra.Command{
 			fmt.Println(err)
 			return
 		}
-		//excute pig
-		_ = pig
-		fmt.Printf("Sending in a pig into the %s trench....", lang)
 
+		fmt.Printf("Sending in a pig into the %s trench....", lang)
+		c := make(chan runners.TestResult)
+		wg.Add(1)
+		go clump(pig, c, &wg)
+		go func() {
+			wg.Wait()
+			close(c)
+		}()
+		for result := range c {
+			fmt.Printf("Test Name: %s\n", result.Testname)
+			fmt.Printf("Passed: %t\n", result.Passed)
+			fmt.Printf("Output: %s\n", result.Stdout)
+		}
 	},
+}
+
+func clump(pig runners.TestRunner, c chan runners.TestResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	slices, er := pig.ListTests(".")
+	if er != nil {
+		fmt.Print(er)
+		return
+	}
+	for _, tests := range slices {
+		result, errr := pig.RunTest(tests)
+
+		if errr != nil {
+			continue
+		}
+		c <- result
+	}
+
 }
 
 func init() {
