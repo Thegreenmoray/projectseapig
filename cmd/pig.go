@@ -46,7 +46,7 @@ var pigCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Println("sending the herd! this may take a while.....")
+		fmt.Println(factory.Yellow + "sending the herd! this may take a while....." + factory.Reset)
 
 		if deep {
 			n = 100
@@ -60,7 +60,7 @@ var pigCmd = &cobra.Command{
 				continue
 			}
 			wg.Add(1)
-			go clump(pigg, c, &wg)
+			go worker(pigg, c, &wg)
 
 		}
 
@@ -68,11 +68,43 @@ var pigCmd = &cobra.Command{
 			wg.Wait()
 			close(c)
 		}()
-		for f := range c {
-			fmt.Printf("Test Name: %s\n", f.Testname)
-			fmt.Printf("Passed: %t\n", f.Passed)
-			fmt.Printf("Output: %s\n", f.Stdout)
 
+		var testing []runners.TestResult
+		for f := range c {
+			testing = append(testing, f)
+
+		}
+		outof := len(testing)
+		passed := 0
+
+		for _, o := range testing {
+			if o.Passed {
+				passed++
+			}
+			statusColor := factory.Green
+			statusText := "PASS"
+
+			if !o.Passed {
+				statusColor = factory.Red
+				statusText = "FAIL"
+			}
+
+			fmt.Printf("%s[%s]%s %-20s (%s)\n", statusColor, statusText, factory.Reset, o.Testname, o.Timetaken)
+			fmt.Printf("Output:\n%s\n\n", o.Stdout)
+		}
+		failed := outof - passed
+
+		fmt.Println(factory.Bold + "\n=== Summary ===" + factory.Reset)
+		fmt.Printf("Total tests: %d\n", outof)
+		fmt.Printf("Passed:      %s%d%s\n", factory.Green, passed, factory.Reset)
+		fmt.Printf("Failed:      %s%d%s\n", factory.Red, failed, factory.Reset)
+
+		if failed == 0 {
+			fmt.Println(factory.Green + factory.Bold + "Overall: PASS" + factory.Reset)
+			os.Exit(0)
+		} else {
+			fmt.Println(factory.Red + factory.Bold + "Overall: FAIL" + factory.Reset)
+			os.Exit(1)
 		}
 
 	},

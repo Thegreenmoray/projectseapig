@@ -5,7 +5,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/Justi/projectseapig/factory"
 	"github.com/Justi/projectseapig/runners"
@@ -32,7 +34,7 @@ var runCmd = &cobra.Command{
 		fmt.Printf("Sending in a pig into the %s trench....", lang)
 		c := make(chan runners.TestResult)
 		wg.Add(1)
-		go clump(pig, c, &wg)
+		go worker(pig, c, &wg)
 		go func() {
 			wg.Wait()
 			close(c)
@@ -41,11 +43,18 @@ var runCmd = &cobra.Command{
 			fmt.Printf("Test Name: %s\n", result.Testname)
 			fmt.Printf("Passed: %t\n", result.Passed)
 			fmt.Printf("Output: %s\n", result.Stdout)
+			if result.Passed {
+				fmt.Println("Overall: PASS")
+				os.Exit(0)
+			} else {
+				fmt.Println("Overall: FAIL")
+				os.Exit(1)
+			}
 		}
 	},
 }
 
-func clump(pig runners.TestRunner, c chan runners.TestResult, wg *sync.WaitGroup) {
+func worker(pig runners.TestRunner, c chan runners.TestResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	slices, er := pig.ListTests(".")
@@ -54,11 +63,14 @@ func clump(pig runners.TestRunner, c chan runners.TestResult, wg *sync.WaitGroup
 		return
 	}
 	for _, tests := range slices {
+		start := time.Now()
 		result, errr := pig.RunTest(tests)
+		result.Timetaken = time.Since(start)
 
 		if errr != nil {
 			continue
 		}
+		fmt.Printf("[%t], [%s] ,[%o]", result.Passed, result.Testname, result.Timetaken)
 		c <- result
 	}
 
