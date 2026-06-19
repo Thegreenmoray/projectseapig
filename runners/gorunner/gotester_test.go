@@ -6,7 +6,11 @@ import (
 
 func TestGoDetect(t *testing.T) {
 	g := Gotester{}
-	if !g.Detect(".") {
+	idd, err := g.Detect(".")
+	if err != nil {
+		t.Fatal("expected Go project to be detected")
+	}
+	if idd < 10 {
 		t.Fatal("expected Go project to be detected")
 	}
 

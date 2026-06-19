@@ -1,6 +1,7 @@
 package gorunner
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,17 +13,18 @@ import (
 type Gotester struct {
 }
 
-func (g Gotester) Detect(projectPath string) bool {
-	//stats as in status of the file
-	if _, err := os.Stat(filepath.Join(projectPath, "go.mod")); err == nil {
-		return true
+func (g *Gotester) Detect(projectPath string) (int, error) {
+	score := 0
+
+	err := dfsWalk(projectPath, &score)
+	if err != nil {
+		return 0, nil
 	}
-	//Glob is equvient to ls
-	matches, _ := filepath.Glob(filepath.Join(projectPath, "*_test.go"))
-	return len(matches) > 0
+
+	return score, nil
 }
 
-func (g Gotester) ListTests(projectPath string) ([]string, error) {
+func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	//basic command line
 	cmd := exec.Command("go", "test", "-list", ".", projectPath)
 	out, err := cmd.CombinedOutput()
@@ -43,7 +45,7 @@ func (g Gotester) ListTests(projectPath string) ([]string, error) {
 	return tests, nil
 }
 
-func (g Gotester) RunTest(testName string) (runners.TestResult, error) {
+func (g *Gotester) RunTest(testName string) (runners.TestResult, error) {
 
 	cmd := exec.Command("go", "test", "-run", "^"+testName+"$")
 	out, err := cmd.CombinedOutput()
@@ -55,4 +57,88 @@ func (g Gotester) RunTest(testName string) (runners.TestResult, error) {
 		Passed:   passed,
 		Stdout:   string(out),
 	}, nil
+}
+
+func dfsWalk(path string, score *int) error {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+
+	// Strongest signal: go.mod
+	if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+		*score += 10
+	}
+
+	for _, entry := range entries {
+		full := filepath.Join(path, entry.Name())
+
+		if entry.IsDir() {
+			// Recurse
+			if err := dfsWalk(full, score); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// --- FILE CHECKS ---
+
+		// 1. Test file pattern
+		if strings.HasSuffix(entry.Name(), "_test.go") {
+			*score += 5
+		}
+
+		// 2. Only scan .go files
+		if strings.HasSuffix(entry.Name(), ".go") {
+			if err := scanGoFile(full, score); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func scanGoFile(path string, score *int) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Trim whitespace
+		line = strings.TrimSpace(line)
+
+		// Go language signatures
+		switch {
+		case strings.HasPrefix(line, "package "):
+			*score += 3
+		case strings.HasPrefix(line, "import "):
+			*score += 2
+		case strings.HasPrefix(line, "func "):
+			*score += 2
+		case strings.Contains(line, "struct {"):
+			*score += 1
+		case strings.Contains(line, "interface {"):
+			*score += 1
+		case strings.Contains(line, "go "): // goroutine
+			*score += 1
+		case strings.Contains(line, "chan "):
+			*score += 1
+		case strings.HasPrefix(line, "//go:build"):
+			*score += 2
+		}
+
+		// Early exit: if score is already high, no need to scan whole file
+		if *score >= 15 {
+			break
+		}
+	}
+
+	return scanner.Err()
 }

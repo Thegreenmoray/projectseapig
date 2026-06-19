@@ -13,33 +13,39 @@ import (
 type Javatester struct {
 }
 
-func (g Javatester) Detect(projectPath string) bool {
+func (g *Javatester) Detect(projectPath string) (int, error) {
+	score := 0
+
 	// Maven
 	if _, err := os.Stat(filepath.Join(projectPath, "pom.xml")); err == nil {
-		return true
+		score += 10
 	}
 
 	// Gradle
 	if _, err := os.Stat(filepath.Join(projectPath, "build.gradle")); err == nil {
-		return true
+		score += 10
 	}
 	if _, err := os.Stat(filepath.Join(projectPath, "build.gradle.kts")); err == nil {
-		return true
+		score += 10
 	}
 
 	// Java test files (src/test/java)
-	testPattern := filepath.Join(projectPath, "src", "test", "java", "**", "*.java")
+	testPattern := filepath.Join(projectPath, "src", "test", "java", "*.java")
 	matches, _ := filepath.Glob(testPattern)
 	if len(matches) > 0 {
-		return true
+		score += 5
 	}
 
 	// Any .java files in the project root (fallback)
 	rootJava, _ := filepath.Glob(filepath.Join(projectPath, "*.java"))
-	return len(rootJava) > 0
+	if len(rootJava) > 0 {
+		score += 3
+	}
+
+	return score, nil
 }
 
-func (g Javatester) ListTests(projectPath string) ([]string, error) {
+func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 
 	// Look for Java test files
 	pattern := filepath.Join(projectPath, "src", "test", "java", "**", "*Test.java")
@@ -69,7 +75,7 @@ func (g Javatester) ListTests(projectPath string) ([]string, error) {
 
 }
 
-func (g Javatester) RunTest(testName string) (runners.TestResult, error) {
+func (g *Javatester) RunTest(testName string) (runners.TestResult, error) {
 	var cmd *exec.Cmd
 
 	// Detect Maven

@@ -13,16 +13,22 @@ func Lang() string {
 	js := jsrunner.JStester{}
 	python := pythonrunner.Pythontester{}
 
-	if golang.Detect(".") {
+	point, _ := golang.Detect(".")
+	if point > 15 {
 		return "go"
 	}
-	if java.Detect(".") {
+
+	point2, _ := java.Detect(".")
+	if point2 > 15 {
 		return "java"
 	}
-	if js.Detect(".") {
+
+	point3, _ := js.Detect(".")
+	if point3 > 15 {
 		return "js"
 	}
-	if python.Detect(".") {
+	point4, _ := python.Detect(".")
+	if point4 > 15 {
 		return "python"
 	}
 	return ""

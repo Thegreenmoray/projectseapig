@@ -12,7 +12,11 @@ func TestJavaDetect(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project/>"), 0644)
 
 	tester := Javatester{}
-	if !tester.Detect(dir) {
+	idd, err := tester.Detect(dir)
+	if err != nil {
+		t.Fatal("expected Java project to be detected")
+	}
+	if idd < 10 {
 		t.Errorf("Detect() should return true when pom.xml exists")
 	}
 }

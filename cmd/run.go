@@ -33,8 +33,9 @@ var runCmd = &cobra.Command{
 
 		fmt.Printf("Sending in a pig into the %s trench....", lang)
 		c := make(chan runners.TestResult)
+		d := make(chan string)
 		wg.Add(1)
-		go worker(pig, c, &wg)
+		go worker(pig, d, c, &wg)
 		go func() {
 			wg.Wait()
 			close(c)
@@ -54,26 +55,19 @@ var runCmd = &cobra.Command{
 	},
 }
 
-func worker(pig runners.TestRunner, c chan runners.TestResult, wg *sync.WaitGroup) {
+func worker(pig runners.TestRunner, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	slices, er := pig.ListTests(".")
-	if er != nil {
-		fmt.Print(er)
-		return
-	}
-	for _, tests := range slices {
+	for tests := range jobs {
 		start := time.Now()
 		result, errr := pig.RunTest(tests)
 		result.Timetaken = time.Since(start)
-
 		if errr != nil {
 			continue
 		}
 		fmt.Printf("[%t], [%s] ,[%o]", result.Passed, result.Testname, result.Timetaken)
-		c <- result
+		results <- result
 	}
-
 }
 
 func init() {

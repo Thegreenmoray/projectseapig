@@ -14,14 +14,14 @@ import (
 func Pigtype(lang string) (runners.TestRunner, error) {
 	switch lang {
 	case "java":
-		return javarunner.Javatester{}, nil
+		return &javarunner.Javatester{}, nil
 
 	case "js":
-		return jsrunner.JStester{}, nil
+		return &jsrunner.JStester{}, nil
 	case "go":
-		return gorunner.Gotester{}, nil
+		return &gorunner.Gotester{}, nil
 	case "python":
-		return pythonrunner.Pythontester{}, nil
+		return &pythonrunner.Pythontester{}, nil
 	default:
 		return nil, errors.New("Lang not supported...")
 	}
