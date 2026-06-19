@@ -18,6 +18,7 @@ func TestPythonDetect(t *testing.T) {
 	}
 	if score <= 0 {
 		t.Errorf("Expected positive score, got %d", score)
+
 	}
 }
 
