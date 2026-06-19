@@ -12,12 +12,12 @@ func TestPythonDetect(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("pytest"), 0644)
 
 	tester := Pythontester{}
-	snek, err := tester.Detect(dir)
+	score, err := tester.Detect(dir)
 	if err != nil {
-		t.Fatal("expected Python project to be detected")
+		t.Fatal(err)
 	}
-	if 0 <= snek {
-		t.Errorf("Detect() should return true when requirements.txt exists")
+	if score <= 0 {
+		t.Errorf("Expected positive score, got %d", score)
 	}
 }
 

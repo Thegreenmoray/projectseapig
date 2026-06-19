@@ -1,7 +1,6 @@
 package javarunner
 
 import (
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,32 +45,21 @@ func (g *Javatester) Detect(projectPath string) (int, error) {
 }
 
 func (g *Javatester) ListTests(projectPath string) ([]string, error) {
-
-	// Look for Java test files
-	pattern := filepath.Join(projectPath, "src", "test", "java", "**", "*Test.java")
-
-	// If the directory doesn't exist, return empty list
-	if _, err := os.Stat(pattern); os.IsNotExist(err) {
-		return []string{}, nil
-	}
-	// NOTE: Go's Glob does NOT support **, so we walk manually
 	var tests []string
 
-	filepath.WalkDir(filepath.Join(projectPath, "src", "test", "java"), func(path string, d fs.DirEntry, err error) error {
+	err := filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 
-		if !d.IsDir() && strings.HasSuffix(d.Name(), "Test.java") {
-			// Extract class name (file name without .java)
-			className := strings.TrimSuffix(d.Name(), ".java")
-			tests = append(tests, className)
+		if !info.IsDir() && strings.HasSuffix(info.Name(), "Test.java") {
+			name := strings.TrimSuffix(info.Name(), ".java")
+			tests = append(tests, name)
 		}
-
 		return nil
 	})
 
-	return tests, nil
+	return tests, err
 
 }
 
