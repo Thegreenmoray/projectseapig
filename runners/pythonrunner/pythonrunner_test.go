@@ -16,7 +16,7 @@ func TestPythonDetect(t *testing.T) {
 	if err != nil {
 		t.Fatal("expected Python project to be detected")
 	}
-	if 8 > snek {
+	if 0 <= snek {
 		t.Errorf("Detect() should return true when requirements.txt exists")
 	}
 }

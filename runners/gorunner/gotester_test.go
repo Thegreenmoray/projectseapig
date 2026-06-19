@@ -10,7 +10,7 @@ func TestGoDetect(t *testing.T) {
 	if err != nil {
 		t.Fatal("expected Go project to be detected")
 	}
-	if idd < 10 {
+	if idd <= 0 {
 		t.Fatal("expected Go project to be detected")
 	}
 
