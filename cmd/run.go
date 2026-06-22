@@ -72,7 +72,7 @@ func worker(pig runners.TestRunner, jobs <-chan string, results chan<- runners.T
 
 func init() {
 	rootCmd.AddCommand(runCmd)
-	runCmd.Flags().StringVarP(&lang, "l", "lang", "la", "Language to run tests for (go, python, java, js)")
+	runCmd.Flags().StringVarP(&lang, "lang", "l", "", "Language to run tests for (go, python, java, js)")
 	runCmd.MarkFlagRequired("lang")
 
 }

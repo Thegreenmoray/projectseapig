@@ -4,11 +4,11 @@ Copyright © 2026 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/Justi/projectseapig/factory"
 	"github.com/spf13/cobra"
 )
+
+var path string
 
 // detectCmd represents the detect command
 var detectCmd = &cobra.Command{
@@ -17,17 +17,18 @@ var detectCmd = &cobra.Command{
 	Long: `SeaPig detects current project language you are using and returns the key word 
 	needed to execute run and pig, if the language is not supported will throw an error`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("searching files.....")
-		lang := factory.Lang()
+		cmd.Println("searching files.....")
+		lang := factory.Lang(path)
 		if len(lang) == 0 {
-			fmt.Println("error: lang not detected, likely not supported")
+			cmd.Println("error: lang not detected, likely not supported")
 			return
 		}
-		fmt.Println(lang)
+		cmd.Println(lang)
 
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(detectCmd)
+	detectCmd.Flags().StringVarP(&path, "path", "p", "", "Path to the project")
 }
