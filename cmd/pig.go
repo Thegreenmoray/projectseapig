@@ -9,9 +9,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Justi/projectseapig/factory"
 	"github.com/Justi/projectseapig/runners"
+	"github.com/panjf2000/ants/v2"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
@@ -33,7 +36,7 @@ var pigCmd = &cobra.Command{
 		if !cancontinue {
 			return
 		}
-		fmt.Println(factory.Yellow + "sending the herd! this may take a while....." + factory.Reset)
+		log.Info().Msg(factory.Yellow + "sending the herd! this may take a while....." + factory.Reset)
 
 		if deep {
 			n = 100
@@ -45,28 +48,30 @@ var pigCmd = &cobra.Command{
 			return
 		}
 		c := make(chan runners.TestResult, n)
-		d := make(chan string)
+		//ants is a more efficent goroutine, old way would spawn too many routines
+		//using up too many resources
+		pool, _ := ants.NewPool(n)
+		var wg sync.WaitGroup
 
-		for i := 0; i < n; i++ {
-			pigg, err := factory.Pigtype(l)
-			if err != nil {
-				continue
-			}
+		for _, testName := range tests {
+			testName := testName // capture loop variable
+
 			wg.Add(1)
-			go worker(pigg, d, c, &wg)
+			pool.Submit(func() {
+				defer wg.Done()
 
+				start := time.Now()
+				result, err := pig.RunTest(testName)
+				result.Timetaken = time.Since(start)
+				if err == nil {
+					c <- result
+				}
+			})
 		}
-
-		go func() {
-			for _, t := range tests {
-				d <- t
-			}
-			close(d)
-		}()
-
 		go func() {
 			wg.Wait()
 			close(c)
+			pool.Release()
 		}()
 
 		var testing []runners.TestResult

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Justi/projectseapig/factory"
 	"github.com/Justi/projectseapig/runners"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
@@ -41,14 +42,14 @@ var runCmd = &cobra.Command{
 			close(c)
 		}()
 		for result := range c {
-			fmt.Printf("Test Name: %s\n", result.Testname)
-			fmt.Printf("Passed: %t\n", result.Passed)
-			fmt.Printf("Output: %s\n", result.Stdout)
+			log.Info().Str("Test Name: %s\n", result.Testname).Msg("")
+			log.Info().Bool("Passed: %t\n", result.Passed).Msg("")
+			log.Info().Str("Output: %s\n", result.Stdout).Msg("")
 			if result.Passed {
-				fmt.Println("Overall: PASS")
+				log.Info().Msg("Overall: PASS")
 				os.Exit(0)
 			} else {
-				fmt.Println("Overall: FAIL")
+				log.Info().Msg("Overall: FAIL")
 				os.Exit(1)
 			}
 		}
@@ -65,7 +66,11 @@ func worker(pig runners.TestRunner, jobs <-chan string, results chan<- runners.T
 		if errr != nil {
 			continue
 		}
-		fmt.Printf("[%t], [%s] ,[%o]", result.Passed, result.Testname, result.Timetaken)
+		log.Info().
+			Bool("passed", result.Passed).
+			Str("test", result.Testname).
+			Dur("time", result.Timetaken).
+			Msg("test completed")
 		results <- result
 	}
 }
