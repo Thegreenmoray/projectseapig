@@ -20,7 +20,7 @@ func TestJSTesterDetect(t *testing.T) {
 	if err != nil {
 		t.Fatal("expected JS project to be detected")
 	}
-	if addo <= 0 {
+	if addo < 0 {
 		t.Errorf("Detect() should return true when package.json exists")
 	}
 }

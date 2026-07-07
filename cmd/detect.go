@@ -16,7 +16,7 @@ var detectCmd = &cobra.Command{
 	Long: `SeaPig detects current project language you are using and returns the key word 
 	needed to execute run and pig, if the language is not supported will throw an error`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Println("searching files.....")
+		cmd.Println("Python, Java, JS, Go")
 
 	},
 }

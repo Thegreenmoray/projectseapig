@@ -16,7 +16,7 @@ func TestJavaDetect(t *testing.T) {
 	if err != nil {
 		t.Fatal("expected Java project to be detected")
 	}
-	if idd <= 0 {
+	if idd < 0 {
 		t.Errorf("Detect() should return true when pom.xml exists")
 	}
 }

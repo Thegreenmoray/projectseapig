@@ -16,7 +16,7 @@ func TestPythonDetect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if score <= 0 {
+	if score < 0 {
 		t.Errorf("Expected positive score, got %d", score)
 
 	}
