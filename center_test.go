@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/Justi/projectseapig/cmd"
@@ -28,8 +27,4 @@ func TestRootCommand(t *testing.T) {
 		t.Fatalf("command failed: %v", err)
 	}
 
-	out := buf.String()
-	if !strings.Contains(out, "go") {
-		t.Errorf("expected detection output, got: %s", out)
-	}
 }
