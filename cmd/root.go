@@ -6,12 +6,15 @@ package cmd
 import (
 	"os"
 
+	"github.com/Justi/projectseapig/factory"
 	"github.com/spf13/cobra"
 )
 
 func NewRootCmd() *cobra.Command {
 	return rootCmd
 }
+
+var debug bool
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -32,6 +35,7 @@ to quickly create a Cobra application.`,
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	err := rootCmd.Execute()
+	factory.InitLogger(debug)
 	if err != nil {
 		os.Exit(1)
 	}
@@ -47,4 +51,6 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging")
+
 }

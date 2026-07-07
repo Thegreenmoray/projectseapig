@@ -44,8 +44,10 @@ var pigCmd = &cobra.Command{
 
 		tests, err := pig.ListTests(".")
 		if err != nil {
-			fmt.Println(err)
+			log.Error().Err(err).Msg("failed to list tests")
 			return
+		} else if factory.Cfg.Defaultworkersize > 0 {
+			n = factory.Cfg.Defaultworkersize
 		}
 		c := make(chan runners.TestResult, n)
 		//ants is a more efficent goroutine, old way would spawn too many routines

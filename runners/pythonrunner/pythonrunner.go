@@ -1,7 +1,7 @@
 package pythonrunner
 
 import (
-	"os"
+	//"os"
 	//"os/exec"
 	"path/filepath"
 	//"strings"
@@ -14,35 +14,6 @@ type Pythontester struct {
 
 func (g *Pythontester) Detect(projectPath string) (int, error) {
 	score := 0
-
-	// Strong indicators
-	if _, err := os.Stat(filepath.Join(projectPath, "pyproject.toml")); err == nil {
-		score += 10
-	}
-	if _, err := os.Stat(filepath.Join(projectPath, "requirements.txt")); err == nil {
-		score += 8
-	}
-	if _, err := os.Stat(filepath.Join(projectPath, "Pipfile")); err == nil {
-		score += 8
-	}
-	if _, err := os.Stat(filepath.Join(projectPath, "setup.py")); err == nil {
-		score += 8
-	}
-
-	// Test file patterns
-	patterns := []string{"test_*.py", "*_test.py"}
-	for _, ptn := range patterns {
-		matches, _ := filepath.Glob(filepath.Join(projectPath, ptn))
-		if len(matches) > 0 {
-			score += 5
-		}
-	}
-
-	// Any .py files at all (fallback)
-	pyFiles, _ := filepath.Glob(filepath.Join(projectPath, "*.py"))
-	if len(pyFiles) > 0 {
-		score += 3
-	}
 
 	return score, nil
 }
