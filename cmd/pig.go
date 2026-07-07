@@ -56,7 +56,7 @@ var pigCmd = &cobra.Command{
 		var wg sync.WaitGroup
 
 		for _, testName := range tests {
-			testName := testName // capture loop variable
+			//testName := testName // capture loop variable
 
 			wg.Add(1)
 			pool.Submit(func() {
