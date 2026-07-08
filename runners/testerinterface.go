@@ -14,6 +14,7 @@ type Pig struct {
 	PassCount     int
 	FailCount     int
 	IsFlaky       bool
+	Testname      string
 }
 
 type TestResult struct {

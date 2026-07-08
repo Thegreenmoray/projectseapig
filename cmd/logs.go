@@ -56,7 +56,7 @@ func showSummary(db *bbolt.DB) {
 
 			// Format and print a clean summary line
 			status := fmt.Sprintf("%d/%d", p.PassCount, p.FailCount+p.PassCount)
-			fmt.Printf(" %-15.2f%% %-10s\n", p.Flakynessrate, status)
+			fmt.Printf("%-50s %-15.2f%% %-10s\n", p.Testname, p.Flakynessrate, status)
 			return nil
 		})
 	})
