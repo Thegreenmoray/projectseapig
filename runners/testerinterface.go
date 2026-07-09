@@ -29,7 +29,7 @@ type TestResult struct {
 
 }
 
-func results(seapig *Pig) {
+func Results(seapig *Pig) {
 	ran := len(seapig.Run)
 	if ran < 0 {
 		return

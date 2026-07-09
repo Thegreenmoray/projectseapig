@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Justi/projectseapig/factory"
+	"github.com/Justi/projectseapig/logs"
 	"github.com/Justi/projectseapig/runners"
 	"github.com/panjf2000/ants/v2"
 	"github.com/rs/zerolog/log"
@@ -49,26 +50,30 @@ var pigCmd = &cobra.Command{
 		} else if factory.Cfg.Defaultworkersize >= 0 {
 			n = factory.Cfg.Defaultworkersize
 		}
-		c := make(chan runners.TestResult, n)
+		totalExpectedResults := len(tests) * n
+		c := make(chan runners.TestResult, totalExpectedResults)
 		//ants is a more efficent goroutine, old way would spawn too many routines
 		//using up too many resources
 		pool, _ := ants.NewPool(n)
 		var wg sync.WaitGroup
 
 		for _, testName := range tests {
-			//testName := testName // capture loop variable
 
-			wg.Add(1)
-			pool.Submit(func() {
-				defer wg.Done()
+			for i := 0; i < n; i++ {
+				wg.Add(1)
+				// Capture testName safely for the goroutine closure
+				tName := testName
+				pool.Submit(func() {
+					defer wg.Done()
 
-				start := time.Now()
-				result, err := pig.RunTest(testName)
-				result.Timetaken = time.Since(start)
-				if err == nil {
-					c <- result
-				}
-			})
+					start := time.Now()
+					result, err := pig.RunTest(tName)
+					result.Timetaken = time.Since(start)
+					if err == nil {
+						c <- result
+					}
+				})
+			}
 		}
 		go func() {
 			wg.Wait()
@@ -76,9 +81,9 @@ var pigCmd = &cobra.Command{
 			pool.Release()
 		}()
 
-		var testing []runners.TestResult
+		testing := make(map[string][]runners.TestResult)
 		for f := range c {
-			testing = append(testing, f)
+			testing[f.Testname] = append(testing[f.Testname], f)
 		}
 		results(&testing)
 
@@ -87,39 +92,21 @@ var pigCmd = &cobra.Command{
 
 //a little messy up here, may want to break this up
 
-func results(testing *[]runners.TestResult) {
+func results(testing *map[string][]runners.TestResult) {
 
-	outof := len(*testing)
-	passed := 0
-
-	for _, o := range *testing {
-		if o.Passed {
-			passed++
-		}
-		statusColor := factory.Green
-		statusText := "PASS"
-
-		if !o.Passed {
-			statusColor = factory.Red
-			statusText = "FAIL"
+	for testName, runs := range *testing {
+		batchResult := runners.Pig{
+			Run: runs,
 		}
 
-		fmt.Printf("%s[%s]%s %-20s (%s)\n", statusColor, statusText, factory.Reset, o.Testname, o.Timetaken)
-		fmt.Printf("Output:\n%s\n\n", o.Stdout)
-	}
-	failed := outof - passed
+		// Calculate pass/fail ratios and flakiness rate
+		runners.Results(&batchResult)
 
-	fmt.Println(factory.Bold + "\n=== Summary ===" + factory.Reset)
-	fmt.Printf("Total tests: %d\n", outof)
-	fmt.Printf("Passed:      %s%d%s\n", factory.Green, passed, factory.Reset)
-	fmt.Printf("Failed:      %s%d%s\n", factory.Red, failed, factory.Reset)
-
-	if failed == 0 {
-		fmt.Println(factory.Green + factory.Bold + "Overall: PASS" + factory.Reset)
-		os.Exit(0)
-	} else {
-		fmt.Println(factory.Red + factory.Bold + "Overall: FAIL" + factory.Reset)
-		os.Exit(1)
+		// Save this specific test's history directly into Bbolt!
+		err := (&logs.BoltRepo{}).SavePig(testName, batchResult)
+		if err != nil {
+			log.Error().Err(err).Msgf("failed to save logs for %s", testName)
+		}
 	}
 
 }
@@ -128,6 +115,11 @@ func verification() (bool, runners.TestRunner) {
 	fmt.Println("warning! this very expensive to run, are you sure you want to do this (y/n)")
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+	if !(input == "y" || input == "yes") {
+		fmt.Println("user cancelled process")
+		return false, nil
+	}
 	if err != nil {
 		fmt.Printf("failed to read input: %v\n", err)
 		return false, nil
@@ -143,11 +135,7 @@ func verification() (bool, runners.TestRunner) {
 		fmt.Printf("%x is too small, try a bigger number", n)
 		return false, nil
 	}
-	input = strings.TrimSpace(strings.ToLower(input))
-	if !(input == "y" || input == "yes") {
-		fmt.Println("user cancelled process")
-		return false, nil
-	}
+
 	return true, pig
 }
 
