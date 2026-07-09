@@ -25,8 +25,87 @@ func TestJavaListTests(t *testing.T) {
 	}
 }
 
-func TestJavaRunTest(t *testing.T) {
+func TestJavaRunTestpom(t *testing.T) {
 	tester := Javatester{}
+	dir := t.TempDir()
+
+	// 1. Create pom.xml inside the temp directory
+	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project/>"), 0644)
+
+	// 2. Save the original working directory path
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current working directory: %v", err)
+	}
+
+	// 3. Jump inside the temp directory
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("failed to change working directory: %v", err)
+	}
+
+	// 4. CRITICAL: Tell Go to jump back to your project folder when this test finishes
+	defer os.Chdir(oldWD)
+
+	// 5. Run the test! Now os.Stat("pom.xml") evaluates to true!
+	result, _ := tester.RunTest("MathTest")
+
+	if result.Testname != "MathTest" {
+		t.Errorf("Expected test name MathTest, got %s", result.Testname)
+	}
+}
+
+func TestJavaRunTestgradle(t *testing.T) {
+	tester := Javatester{}
+	dir := t.TempDir()
+
+	// 1. Create build.gradle inside the temp directory
+	os.WriteFile(filepath.Join(dir, "build.gradle"), []byte("<project/>"), 0644)
+
+	// 2. Save the original working directory path
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current working directory: %v", err)
+	}
+
+	// 3. Jump inside the temp directory
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("failed to change working directory: %v", err)
+	}
+
+	// 4. CRITICAL: Tell Go to jump back to your project folder when this test finishes
+	defer os.Chdir(oldWD)
+
+	// 5. Run the test! Now os.Stat("build.gradle") evaluates to true!
+	result, _ := tester.RunTest("MathTest")
+
+	if result.Testname != "MathTest" {
+		t.Errorf("Expected test name MathTest, got %s", result.Testname)
+	}
+
+}
+
+func TestJavaRunTestgradle2(t *testing.T) {
+	tester := Javatester{}
+	dir := t.TempDir()
+
+	// 1. Create build.gradle.kts inside the temp directory
+	os.WriteFile(filepath.Join(dir, "build.gradle.kts"), []byte("<project/>"), 0644)
+
+	// 2. Save the original working directory path
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current working directory: %v", err)
+	}
+
+	// 3. Jump inside the temp directory
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("failed to change working directory: %v", err)
+	}
+
+	// 4. CRITICAL: Tell Go to jump back to your project folder when this test finishes
+	defer os.Chdir(oldWD)
+
+	// 5. Run the test! Now os.Stat("build.gradle") evaluates to true!
 	result, _ := tester.RunTest("MathTest")
 
 	if result.Testname != "MathTest" {

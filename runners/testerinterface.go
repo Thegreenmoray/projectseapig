@@ -34,13 +34,12 @@ func Results(seapig *Pig) {
 	if ran < 0 {
 		return
 	}
-	pass := 0
-	fail := 0
+
 	for _, test := range seapig.Run {
 		if test.Passed {
-			pass++
+			seapig.PassCount++
 		} else {
-			fail++
+			seapig.FailCount++
 		}
 	}
 	// Flakiness calculation: failed runs / total runs
