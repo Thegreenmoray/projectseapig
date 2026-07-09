@@ -6,21 +6,6 @@ import (
 	"testing"
 )
 
-func TestJavaDetect(t *testing.T) {
-	dir := t.TempDir()
-
-	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project/>"), 0644)
-
-	tester := Javatester{}
-	idd, err := tester.Detect(dir)
-	if err != nil {
-		t.Fatal("expected Java project to be detected")
-	}
-	if idd < 0 {
-		t.Errorf("Detect() should return true when pom.xml exists")
-	}
-}
-
 func TestJavaListTests(t *testing.T) {
 	dir := t.TempDir()
 

@@ -3,7 +3,6 @@ package runners
 import "time"
 
 type TestRunner interface {
-	Detect(projectPath string) (int, error)
 	ListTests(projectPath string) ([]string, error)
 	RunTest(testName string) (TestResult, error)
 }

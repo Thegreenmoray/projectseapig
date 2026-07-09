@@ -12,12 +12,6 @@ import (
 type Pythontester struct {
 }
 
-func (g *Pythontester) Detect(projectPath string) (int, error) {
-	score := 0
-
-	return score, nil
-}
-
 func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 
 	patterns := []string{"test_*.py", "*_test.py"}

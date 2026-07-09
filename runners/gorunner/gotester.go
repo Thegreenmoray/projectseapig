@@ -10,12 +10,6 @@ import (
 type Gotester struct {
 }
 
-func (g *Gotester) Detect(projectPath string) (int, error) {
-	score := 0
-
-	return score, nil
-}
-
 func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	//basic command line
 	cmd := exec.Command("go", "test", "-list", ".", projectPath)

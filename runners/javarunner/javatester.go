@@ -12,12 +12,6 @@ import (
 type Javatester struct {
 }
 
-func (g *Javatester) Detect(projectPath string) (int, error) {
-	score := 0
-
-	return score, nil
-}
-
 func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 	var tests []string
 

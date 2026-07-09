@@ -6,25 +6,6 @@ import (
 	"testing"
 )
 
-func TestJSTesterDetect(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create a fake package.json
-	err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}"), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tester := JStester{}
-	addo, err := tester.Detect(dir)
-	if err != nil {
-		t.Fatal("expected JS project to be detected")
-	}
-	if addo < 0 {
-		t.Errorf("Detect() should return true when package.json exists")
-	}
-}
-
 func TestJSTesterListTests(t *testing.T) {
 	dir := t.TempDir()
 

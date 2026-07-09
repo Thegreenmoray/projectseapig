@@ -4,18 +4,6 @@ import (
 	"testing"
 )
 
-func TestGoDetect(t *testing.T) {
-	g := Gotester{}
-	idd, err := g.Detect(".")
-	if err != nil {
-		t.Fatal("expected Go project to be detected")
-	}
-	if idd < 0 {
-		t.Fatal("expected Go project to be detected")
-	}
-
-}
-
 func TestGoListTests(t *testing.T) {
 	g := Gotester{}
 	tests, err := g.ListTests(".")

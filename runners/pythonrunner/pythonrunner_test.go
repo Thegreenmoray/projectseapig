@@ -6,22 +6,6 @@ import (
 	"testing"
 )
 
-func TestPythonDetect(t *testing.T) {
-	dir := t.TempDir()
-
-	os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("pytest"), 0644)
-
-	tester := Pythontester{}
-	score, err := tester.Detect(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if score < 0 {
-		t.Errorf("Expected positive score, got %d", score)
-
-	}
-}
-
 func TestPythonListTests(t *testing.T) {
 	dir := t.TempDir()
 

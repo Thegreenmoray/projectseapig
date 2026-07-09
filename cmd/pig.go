@@ -46,7 +46,7 @@ var pigCmd = &cobra.Command{
 		if err != nil {
 			log.Error().Err(err).Msg("failed to list tests")
 			return
-		} else if factory.Cfg.Defaultworkersize > 0 {
+		} else if factory.Cfg.Defaultworkersize >= 0 {
 			n = factory.Cfg.Defaultworkersize
 		}
 		c := make(chan runners.TestResult, n)
