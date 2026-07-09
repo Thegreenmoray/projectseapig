@@ -18,7 +18,7 @@ func TestRootCommand(t *testing.T) {
 
 	cmdf := cmd.NewRootCmd()
 
-	cmdf.SetArgs([]string{"detect", "--path", dir})
+	cmdf.SetArgs([]string{"list", dir})
 	buf := new(bytes.Buffer)
 	cmdf.SetOut(buf)
 	cmdf.SetErr(buf)
