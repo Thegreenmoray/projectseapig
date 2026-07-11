@@ -22,6 +22,13 @@ func NewBoltRepo(dbPath string) (*BoltRepo, error) {
 	return &BoltRepo{db: db}, nil
 }
 
+func (r *BoltRepo) Close() error {
+	if r.db != nil {
+		return r.db.Close()
+	}
+	return nil
+}
+
 func (r *BoltRepo) SavePig(testName string, pig runners.Pig) error {
 	return r.db.Update(func(tx *bbolt.Tx) error {
 		// 1. Ensure the root bucket for tests exists

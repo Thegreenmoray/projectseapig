@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -53,28 +54,43 @@ var pigCmd = &cobra.Command{
 		totalExpectedResults := len(tests) * n
 		c := make(chan runners.TestResult, totalExpectedResults)
 		//ants is a more efficent goroutine, old way would spawn too many routines
-		//using up too many resources
-		pool, _ := ants.NewPool(n)
+		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
+		// Inside your Command Run block:
+		totalExpectedResults = len(tests) * n
+		c = make(chan runners.TestResult, totalExpectedResults)
 		var wg sync.WaitGroup
 
-		for _, testName := range tests {
+		// 2. Instantiate a fixed PoolWithFunc.
+		// The worker function is defined ONCE here.
+		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0), func(payload interface{}) {
+			args := payload.(taskArgs)
+			defer args.wg.Done()
 
+			start := time.Now()
+			result, err := args.pig.RunTest(args.testName)
+			result.Timetaken = time.Since(start)
+
+			if err == nil {
+				args.ch <- result
+			}
+		})
+
+		// 3. The dispatcher loop is now incredibly lightweight
+		for _, testName := range tests {
 			for i := 0; i < n; i++ {
 				wg.Add(1)
-				// Capture testName safely for the goroutine closure
-				tName := testName
-				pool.Submit(func() {
-					defer wg.Done()
 
-					start := time.Now()
-					result, err := pig.RunTest(tName)
-					result.Timetaken = time.Since(start)
-					if err == nil {
-						c <- result
-					}
+				// Pass only the data payload. No new function allocation on the heap!
+				_ = pool.Invoke(taskArgs{
+					testName: testName,
+					pig:      pig,
+					ch:       c,
+					wg:       &wg,
 				})
 			}
 		}
+
+		// 4. Teardown remains beautifully non-blocking
 		go func() {
 			wg.Wait()
 			close(c)
@@ -88,6 +104,13 @@ var pigCmd = &cobra.Command{
 		results(&testing)
 
 	},
+}
+
+type taskArgs struct {
+	testName string
+	pig      runners.TestRunner
+	ch       chan<- runners.TestResult
+	wg       *sync.WaitGroup
 }
 
 //a little messy up here, may want to break this up
