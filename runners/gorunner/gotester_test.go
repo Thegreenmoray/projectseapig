@@ -2,10 +2,14 @@ package gorunner
 
 import (
 	"testing"
+	"time"
 )
 
 func TestGoListTests(t *testing.T) {
-	g := Gotester{}
+	g := Gotester{BinPath: "go",
+		BaseArgs: []string{"test"},
+		Timeout:  5 * time.Second,
+	}
 	tests, err := g.ListTests(".")
 	if err != nil {
 		t.Fatal(err)
@@ -17,7 +21,10 @@ func TestGoListTests(t *testing.T) {
 }
 
 func TestGoRunTest(t *testing.T) {
-	g := Gotester{}
+	g := Gotester{BinPath: "go",
+		BaseArgs: []string{"test"},
+		Timeout:  5 * time.Second,
+	}
 	result, _ := g.RunTest("TestAdd")
 
 	if result.Testname != "TestAdd" {

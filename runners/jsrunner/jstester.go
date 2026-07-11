@@ -1,9 +1,9 @@
 package jsrunner
 
 import (
-	//"os"
-	//"os/exec"
-	"path/filepath"
+	"context"
+	"os/exec"
+	"strings"
 	"time"
 
 	//"strings"
@@ -18,23 +18,13 @@ type JStester struct {
 	Env      []string      // Custom ENV vars for the test runner process
 }
 
-func (g *JStester) ListTests(projectPath string) ([]string, error) {
+func (j *JStester) ListTests(projectPath string) ([]string, error) {
+	// Use Jest's built-in flag via npx/npm to print individual test files
+	ctx, cancel := context.WithTimeout(context.Background(), j.Timeout)
+	defer cancel()
 
-	patterns := []string{
-		"*.test.js", "*.spec.js",
-		"*.test.mjs", "*.spec.mjs",
-	}
-
-	var tests []string
-	for _, p := range patterns {
-		matches, _ := filepath.Glob(filepath.Join(projectPath, p))
-		tests = append(tests, matches...)
-	}
-
-	return tests, nil
-
-	/*above is stub this will be the real logic
-	cmd := exec.Command("npx", "jest", "--listTests")
+	// Using 'npx jest --listTests' is way more accurate than globbing directories
+	cmd := exec.CommandContext(ctx, "npx", "jest", "--listTests")
 	cmd.Dir = projectPath
 
 	out, err := cmd.CombinedOutput()
@@ -47,31 +37,39 @@ func (g *JStester) ListTests(projectPath string) ([]string, error) {
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasSuffix(line, ".test.js") || strings.HasSuffix(line, ".spec.js") ||
-			strings.HasSuffix(line, ".test.mjs") || strings.HasSuffix(line, ".spec.mjs") {
+		if line != "" {
+			// Jest lists the full or relative file path to the test file
 			tests = append(tests, line)
 		}
 	}
 
-	return tests, nil*/
+	return tests, nil
 }
 
 func (j *JStester) RunTest(testName string) (runners.TestResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), j.Timeout)
+	defer cancel()
 
-	return runners.TestResult{
-		Testname: testName,
-		Passed:   true,
-		Stdout:   "simulated JS test run",
-	}, nil
+	// If using the factory defaults: bin="npm", args=["test", "--", testName]
+	// This cleanly routes down to the package.json scripts configuration
+	args := append(j.BaseArgs, testName)
 
-	/*above is stub this will be the real logic
-	cmd := exec.Command("npx", "jest", testName)
+	cmd := exec.CommandContext(ctx, j.BinPath, args...)
+	if len(j.Env) > 0 {
+		cmd.Env = j.Env
+	}
+
 	out, err := cmd.CombinedOutput()
 	passed := err == nil
+
+	if ctx.Err() == context.DeadlineExceeded {
+		passed = false
+		out = append(out, []byte("\n--- PROJECT SEAPIG: JavaScript execution timed out! ---")...)
+	}
 
 	return runners.TestResult{
 		Testname: testName,
 		Passed:   passed,
 		Stdout:   string(out),
-	}, nil*/
+	}, nil
 }

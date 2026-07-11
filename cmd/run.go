@@ -15,6 +15,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// defer caching until after 1.0v
+
+// I will likely test this first then try it out in the "wild".
 var lang string
 
 // runCmd represents the run command
@@ -25,7 +28,7 @@ var runCmd = &cobra.Command{
 	a less costly run, just to be certain that it isnt just tests failing and ensuring 
 	that SeaPig is configured correctly.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		pig, err := factory.Pigtype(lang)
+		pig, err := factory.Testtype(lang)
 
 		if err != nil {
 			fmt.Println(err)
@@ -36,7 +39,15 @@ var runCmd = &cobra.Command{
 		c := make(chan runners.TestResult)
 		d := make(chan string)
 		wg.Add(1)
+		go testcollection(pig, d, &wg)
+
+		go func() {
+			wg.Wait()
+			close(d)
+		}()
+
 		go worker(pig, d, c, &wg)
+
 		go func() {
 			wg.Wait()
 			close(c)
@@ -56,8 +67,19 @@ var runCmd = &cobra.Command{
 	},
 }
 
-func worker(pig runners.TestRunner, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
+func testcollection(pig runners.TestRunner, jobs chan<- string, wg *sync.WaitGroup) {
 	defer wg.Done()
+	names, err := pig.ListTests(".")
+	if err != nil {
+		return
+	}
+	for _, notanint := range names {
+		jobs <- notanint
+	}
+}
+
+func worker(pig runners.TestRunner, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
+	defer wg.Done() //we want recive data here    //we want to send data here
 
 	for tests := range jobs {
 		start := time.Now()

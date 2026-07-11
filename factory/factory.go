@@ -12,7 +12,7 @@ import (
 	"github.com/Justi/projectseapig/runners"
 )
 
-func Pigtype(lang string) (runners.TestRunner, error) {
+func Testtype(lang string) (runners.TestRunner, error) {
 	switch lang {
 	case "java":
 		return &javarunner.Javatester{

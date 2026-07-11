@@ -1,6 +1,7 @@
 package javarunner
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,39 +38,54 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 }
 
 func (g *Javatester) RunTest(testName string) (runners.TestResult, error) {
-	var cmd *exec.Cmd
+	// 1. Initialize context using our struct's Timeout value
+	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
+	defer cancel()
 
-	// Detect Maven
-	if _, err := os.Stat("pom.xml"); err == nil {
-		cmd = exec.Command("mvn", "-q", "-Dtest="+testName, "test")
-	}
+	var bin string = g.BinPath
+	var args []string
 
-	// Detect Gradle
-	if cmd == nil {
-		if _, err := os.Stat("build.gradle"); err == nil {
-			cmd = exec.Command("gradle", "test", "--tests", testName)
-		} else if _, err := os.Stat("build.gradle.kts"); err == nil {
-			cmd = exec.Command("gradle", "test", "--tests", testName)
+	// 2. Build arguments dynamically based on whether we are using Maven or Gradle
+	// If the user specified 'mvn' or it's the factory default
+	if bin == "mvn" {
+		args = append(g.BaseArgs, "-q", "-Dtest="+testName)
+	} else if bin == "gradle" || bin == "gradlew" || strings.Contains(bin, "gradle") {
+		args = append(g.BaseArgs, "--tests", testName)
+	} else {
+		// Fallback: If BinPath is generic, check the local directory to infer the tool
+		if _, err := os.Stat("pom.xml"); err == nil {
+			bin = "mvn"
+			args = []string{"test", "-q", "-Dtest=" + testName}
+		} else if _, err := os.Stat("build.gradle"); err == nil || os.IsExist(err) {
+			bin = "gradle"
+			args = []string{"test", "--tests", testName}
+		} else {
+			return runners.TestResult{
+				Testname: testName,
+				Passed:   false,
+				Stdout:   "No explicit configuration or local Maven/Gradle build file discovered.",
+			}, nil
 		}
 	}
 
-	// If no build system found
-	if cmd == nil {
-		return runners.TestResult{
-			Testname: testName,
-			Passed:   false,
-			Stdout:   "No Maven or Gradle build file found",
-		}, nil
+	// 3. Construct the execution block with the Timeout context
+	cmd := exec.CommandContext(ctx, bin, args...)
+	if len(g.Env) > 0 {
+		cmd.Env = g.Env
 	}
 
-	// Run the command
 	out, err := cmd.CombinedOutput()
 	passed := err == nil
+
+	// 4. Handle process termination if the context hits its limit
+	if ctx.Err() == context.DeadlineExceeded {
+		passed = false
+		out = append(out, []byte("\n--- PROJECT SEAPIG: Java execution timed out! ---")...)
+	}
 
 	return runners.TestResult{
 		Testname: testName,
 		Passed:   passed,
 		Stdout:   string(out),
 	}, nil
-
 }

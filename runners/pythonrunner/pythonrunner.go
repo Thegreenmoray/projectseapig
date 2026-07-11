@@ -1,12 +1,10 @@
 package pythonrunner
 
 import (
-	//"os"
-	//"os/exec"
-	"path/filepath"
+	"context"
+	"os/exec"
+	"strings"
 	"time"
-
-	//"strings"
 
 	"github.com/Justi/projectseapig/runners"
 )
@@ -19,14 +17,32 @@ type Pythontester struct {
 }
 
 func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
+	defer cancel()
 
-	patterns := []string{"test_*.py", "*_test.py"}
+	// --collect-only finds all tests. -q (quiet) strips unnecessary headers.
+	args := append(g.BaseArgs, "--collect-only", "-q")
+
+	cmd := exec.CommandContext(ctx, g.BinPath, args...)
+	cmd.Dir = projectPath
+	if len(g.Env) > 0 {
+		cmd.Env = g.Env
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(out), "\n")
 	var tests []string
 
-	for _, p := range patterns {
-		matches, _ := filepath.Glob(filepath.Join(projectPath, p))
-		for _, m := range matches {
-			tests = append(tests, filepath.Base(m))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// pytest output lines look like: tests/test_math.py::test_addition
+		// We filter out tracking metrics or empty lines at the bottom of quiet mode
+		if line != "" && !strings.Contains(line, "no tests ran") && strings.Contains(line, "::") {
+			tests = append(tests, line)
 		}
 	}
 
@@ -34,21 +50,28 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 }
 
 func (g *Pythontester) RunTest(testName string) (runners.TestResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
+	defer cancel()
 
-	return runners.TestResult{
-		Testname: testName,
-		Passed:   true,
-		Stdout:   "simulated Python test run",
-	}, nil
+	// testName will look exactly like: tests/test_math.py::test_addition
+	args := append(g.BaseArgs, testName)
 
-	/* above is stub this will be the real logic
-	cmd := exec.Command("pytest", testName)
+	cmd := exec.CommandContext(ctx, g.BinPath, args...)
+	if len(g.Env) > 0 {
+		cmd.Env = g.Env
+	}
+
 	out, err := cmd.CombinedOutput()
 	passed := err == nil
+
+	if ctx.Err() == context.DeadlineExceeded {
+		passed = false
+		out = append(out, []byte("\n--- PROJECT SEAPIG: Python execution timed out! ---")...)
+	}
 
 	return runners.TestResult{
 		Testname: testName,
 		Passed:   passed,
 		Stdout:   string(out),
-	}, nil*/
+	}, nil
 }

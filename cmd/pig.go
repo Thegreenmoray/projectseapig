@@ -33,7 +33,7 @@ var pigCmd = &cobra.Command{
 	. WARNING this process can be Long and CPU intensive, you will be given a chance
 	 to back out if you are not ready`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cancontinue, pig := verification()
+		cancontinue, tester := verification()
 
 		if !cancontinue {
 			return
@@ -44,7 +44,7 @@ var pigCmd = &cobra.Command{
 			n = 100
 		}
 
-		tests, err := pig.ListTests(".")
+		tests, err := tester.ListTests(".")
 		if err != nil {
 			log.Error().Err(err).Msg("failed to list tests")
 			return
@@ -62,12 +62,12 @@ var pigCmd = &cobra.Command{
 
 		// 2. Instantiate a fixed PoolWithFunc.
 		// The worker function is defined ONCE here.
-		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0), func(payload interface{}) {
+		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0)*2, func(payload interface{}) {
 			args := payload.(taskArgs)
 			defer args.wg.Done()
 
 			start := time.Now()
-			result, err := args.pig.RunTest(args.testName)
+			result, err := args.tester.RunTest(args.testName)
 			result.Timetaken = time.Since(start)
 
 			if err == nil {
@@ -83,7 +83,7 @@ var pigCmd = &cobra.Command{
 				// Pass only the data payload. No new function allocation on the heap!
 				_ = pool.Invoke(taskArgs{
 					testName: testName,
-					pig:      pig,
+					tester:   tester,
 					ch:       c,
 					wg:       &wg,
 				})
@@ -108,7 +108,7 @@ var pigCmd = &cobra.Command{
 
 type taskArgs struct {
 	testName string
-	pig      runners.TestRunner
+	tester   runners.TestRunner
 	ch       chan<- runners.TestResult
 	wg       *sync.WaitGroup
 }
@@ -148,7 +148,7 @@ func verification() (bool, runners.TestRunner) {
 		return false, nil
 	}
 
-	pig, err := factory.Pigtype(l)
+	pig, err := factory.Testtype(l)
 	if err != nil {
 		fmt.Println(err)
 		return false, nil
