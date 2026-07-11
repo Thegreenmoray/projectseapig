@@ -5,11 +5,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Justi/projectseapig/runners"
 )
 
 type Javatester struct {
+	BinPath  string        // e.g., "/usr/local/go/bin/go" or just "go"
+	BaseArgs []string      // e.g., []string{"test", "-run"}
+	Timeout  time.Duration // Individual test execution timeout
+	Env      []string      // Custom ENV vars for the test runner process
 }
 
 func (g *Javatester) ListTests(projectPath string) ([]string, error) {

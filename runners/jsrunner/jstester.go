@@ -4,12 +4,18 @@ import (
 	//"os"
 	//"os/exec"
 	"path/filepath"
+	"time"
+
 	//"strings"
 
 	"github.com/Justi/projectseapig/runners"
 )
 
 type JStester struct {
+	BinPath  string        // e.g., "/usr/local/go/bin/go" or just "go"
+	BaseArgs []string      // e.g., []string{"test", "-run"}
+	Timeout  time.Duration // Individual test execution timeout
+	Env      []string      // Custom ENV vars for the test runner process
 }
 
 func (g *JStester) ListTests(projectPath string) ([]string, error) {
