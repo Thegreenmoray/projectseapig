@@ -23,7 +23,6 @@ import (
 var n int
 var l string
 var deep bool
-var wg sync.WaitGroup
 
 // pigCmd represents the pig command
 var pigCmd = &cobra.Command{
@@ -101,7 +100,10 @@ var pigCmd = &cobra.Command{
 		for f := range c {
 			testing[f.Testname] = append(testing[f.Testname], f)
 		}
-		results(&testing)
+		repo, _ := logs.NewBoltRepo("seapig.db")
+		defer repo.Close()
+
+		results1(repo, &testing)
 
 	},
 }
@@ -115,23 +117,21 @@ type taskArgs struct {
 
 //a little messy up here, may want to break this up
 
-func results(testing *map[string][]runners.TestResult) {
+func results1(repo *logs.BoltRepo, testing *map[string][]runners.TestResult) {
 
 	for testName, runs := range *testing {
 		batchResult := runners.Pig{
 			Run: runs,
 		}
 
-		// Calculate pass/fail ratios and flakiness rate
 		runners.Results(&batchResult)
 
-		// Save this specific test's history directly into Bbolt!
-		err := (&logs.BoltRepo{}).SavePig(testName, batchResult)
+		// 2. Use the live repo instance passed from the caller!
+		err := repo.SavePig(testName, batchResult)
 		if err != nil {
 			log.Error().Err(err).Msgf("failed to save logs for %s", testName)
 		}
 	}
-
 }
 
 func verification() (bool, runners.TestRunner) {
