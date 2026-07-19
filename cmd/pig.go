@@ -175,7 +175,7 @@ func verification() (bool, runners.TestRunner) {
 		return false, nil
 	}
 
-	pig, err := factory.Testtype(l)
+	pig, err := factory.Testtype(l, ".")
 	if err != nil {
 		fmt.Println(err)
 		return false, nil

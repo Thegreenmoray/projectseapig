@@ -21,7 +21,7 @@ var runCmd = &cobra.Command{
 a less costly run, just to be certain that it isn't just tests failing and ensuring 
 that SeaPig is configured correctly.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		pig, err := factory.Testtype(lang) // Assuming factory function matches your previous setup
+		pig, err := factory.Testtype(lang, ".") // Assuming factory function matches your previous setup
 		if err != nil {
 			fmt.Println(err)
 			return
