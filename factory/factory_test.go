@@ -9,7 +9,7 @@ import (
 
 func TestFactory(t *testing.T) {
 	java := "java"
-	javarunner, err := Testtype(java)
+	javarunner, err := Testtype(java, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +19,7 @@ func TestFactory(t *testing.T) {
 	}
 
 	js := "js"
-	jsrunner, errr := Testtype(js)
+	jsrunner, errr := Testtype(js, ".")
 	if errr != nil {
 		t.Fatal(errr)
 	}
@@ -29,7 +29,7 @@ func TestFactory(t *testing.T) {
 	}
 
 	python := "python"
-	pythonrunner, errr := Testtype(python)
+	pythonrunner, errr := Testtype(python, ".")
 	if errr != nil {
 		t.Fatal(errr)
 	}
@@ -39,7 +39,7 @@ func TestFactory(t *testing.T) {
 	}
 
 	golang := "go"
-	gorunner, errr := Testtype(golang)
+	gorunner, errr := Testtype(golang, ".")
 	if errr != nil {
 		t.Fatal(errr)
 	}

@@ -2,6 +2,9 @@ package factory
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/Justi/projectseapig/runners/gorunner"
@@ -12,13 +15,31 @@ import (
 	"github.com/Justi/projectseapig/runners"
 )
 
-func Testtype(lang string) (runners.TestRunner, error) {
+func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 	switch lang {
 	case "java":
+		// Set up smart defaults
+		bin := "mvn"
+		args := []string{"test"}
+
+		// Check what kind of project layout we are dealing with
+		if _, err := os.Stat(filepath.Join(projectPath, "build.gradle")); err == nil {
+			bin = "gradle"
+			// Check if the local wrapper script exists
+			wrapper := "gradlew"
+			if runtime.GOOS == "windows" {
+				wrapper = "gradlew.bat"
+			}
+			if _, err := os.Stat(filepath.Join(projectPath, wrapper)); err == nil {
+				bin = wrapper // Use the local wrapper if present
+			}
+		}
+
 		return &javarunner.Javatester{
-			BinPath:  "mvn",
-			BaseArgs: []string{"test"},
-			Timeout:  5 * time.Second,
+			BinPath:     bin,
+			BaseArgs:    args,
+			Timeout:     5 * time.Second,
+			ProjectPath: projectPath, // Pass this down so RunTest knows where to execute
 		}, nil
 	case "js":
 		return &jsrunner.JStester{
