@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -23,6 +24,7 @@ import (
 var n int
 var l string
 var deep bool
+var testLock sync.Mutex
 
 // pigCmd represents the pig command
 var pigCmd = &cobra.Command{
@@ -32,8 +34,10 @@ var pigCmd = &cobra.Command{
 	. WARNING this process can be Long and CPU intensive, you will be given a chance
 	 to back out if you are not ready`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cancontinue, tester := verification()
+		loopFlag, _ := cmd.Flags().GetInt("loop")
+		n = loopFlag
 
+		cancontinue, tester := verification()
 		if !cancontinue {
 			return
 		}
@@ -47,7 +51,13 @@ var pigCmd = &cobra.Command{
 		if err != nil {
 			log.Error().Err(err).Msg("failed to list tests")
 			return
-		} else if factory.Cfg.Defaultworkersize >= 0 {
+		}
+
+		if len(tests) == 0 {
+			log.Info().Msg("no tests found")
+		}
+
+		if n == 10 && factory.Cfg.Defaultworkersize > 0 {
 			n = factory.Cfg.Defaultworkersize
 		}
 		totalExpectedResults := len(tests) * n
@@ -66,12 +76,19 @@ var pigCmd = &cobra.Command{
 			defer args.wg.Done()
 
 			start := time.Now()
+			testLock.Lock()
 			result, err := args.tester.RunTest(args.testName)
+			testLock.Unlock()
 			result.Timetaken = time.Since(start)
-
-			if err == nil {
-				args.ch <- result
+			log.Info().Msgf("%s", args.testName)
+			if result.Testname == "" {
+				result.Testname = args.testName // Guarantee it's never a blank string
 			}
+			if err != nil {
+				result.Stderr = err.Error()
+			}
+			args.ch <- result
+
 		})
 
 		// 3. The dispatcher loop is now incredibly lightweight
@@ -118,15 +135,25 @@ type taskArgs struct {
 //a little messy up here, may want to break this up
 
 func results1(repo *logs.BoltRepo, testing *map[string][]runners.TestResult) {
+	if len(*testing) == 0 {
+		fmt.Println("DEBUG: The testing map is COMPLETELY EMPTY inside results1!")
+		return
+	}
 
 	for testName, runs := range *testing {
+		fmt.Printf("DEBUG: Found test in map: %s with %d runs\n", testName, len(runs))
+
 		batchResult := runners.Pig{
-			Run: runs,
+			Testname: testName,
+			Run:      runs,
 		}
 
 		runners.Results(&batchResult)
 
-		// 2. Use the live repo instance passed from the caller!
+		// Snapshot exactly what is going into the DB
+		debugBytes, _ := json.MarshalIndent(batchResult, "", "  ")
+		fmt.Printf("DEBUG: Saving to DB for key [%s]:\n%s\n", testName, string(debugBytes))
+
 		err := repo.SavePig(testName, batchResult)
 		if err != nil {
 			log.Error().Err(err).Msgf("failed to save logs for %s", testName)
@@ -155,7 +182,7 @@ func verification() (bool, runners.TestRunner) {
 	}
 
 	if n <= 0 {
-		fmt.Printf("%x is too small, try a bigger number", n)
+		fmt.Printf("%d is too small, try a bigger number", n)
 		return false, nil
 	}
 

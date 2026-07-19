@@ -17,16 +17,14 @@ type Pig struct {
 }
 
 type TestResult struct {
-	Testname  string
-	Passed    bool
-	Timetaken time.Duration
-	Timestamp time.Time
-	Exitcode  int
-	Stdout    string
-	Stderr    string
-	Metadata  map[string]string //this stores any errors,callbacks, or panics from the test langugaes
-	//others later
-
+	Testname  string            `json:"test_name"`
+	Passed    bool              `json:"passed"`
+	Timetaken time.Duration     `json:"time_taken"`
+	Timestamp time.Time         `json:"timestamp"`
+	Exitcode  int               `json:"exit_code"`
+	Stdout    string            `json:"stdout"`
+	Stderr    string            `json:"stderr"`
+	Metadata  map[string]string `json:"metadata"`
 }
 
 func Results(seapig *Pig) {

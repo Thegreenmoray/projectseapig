@@ -50,7 +50,8 @@ func (g *Javatester) RunTest(testName string) (runners.TestResult, error) {
 	if bin == "mvn" {
 		args = append(g.BaseArgs, "-q", "-Dtest="+testName)
 	} else if bin == "gradle" || bin == "gradlew" || strings.Contains(bin, "gradle") {
-		args = append(g.BaseArgs, "--tests", testName)
+		// Prepend a wildcard so Gradle finds the class regardless of its package package
+		args = append(g.BaseArgs, "--tests", "*."+testName)
 	} else {
 		// Fallback: If BinPath is generic, check the local directory to infer the tool
 		if _, err := os.Stat("pom.xml"); err == nil {

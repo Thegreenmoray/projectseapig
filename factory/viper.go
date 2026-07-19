@@ -2,6 +2,8 @@ package factory
 
 import (
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/viper"
 )
@@ -10,7 +12,11 @@ func InitConfig() {
 	viper.SetConfigName("seapig")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
-	viper.AddConfigPath("$HOME/.config/seapig")
+
+	// Dynamically fetch the real home directory
+	if home, err := os.UserHomeDir(); err == nil {
+		viper.AddConfigPath(filepath.Join(home, ".config", "seapig"))
+	}
 
 	// Defaults
 	viper.SetDefault("workers", 10)
@@ -18,8 +24,7 @@ func InitConfig() {
 	viper.SetDefault("debug", false)
 	viper.SetDefault("language", "")
 
-	err := viper.ReadInConfig()
-	if err != nil {
+	if err := viper.ReadInConfig(); err != nil {
 		log.Printf("no config file found, using defaults")
 	}
 
