@@ -74,6 +74,7 @@ func showDetailedLogs(db *bbolt.DB, targetTest string) {
 			fmt.Println("No logs found. Run some tests first!")
 			return nil
 		}
+		//fairly self explaintory
 
 		fmt.Printf("\n=== Detailed History for: %s ===\n\n", targetTest)
 		found := false

@@ -3,9 +3,9 @@ Copyright © 2026 NAME HERE <EMAIL ADDRESS>
 */
 package cmd
 
+//"encoding/json"
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -35,18 +35,18 @@ var pigCmd = &cobra.Command{
 	 to back out if you are not ready`,
 	Run: func(cmd *cobra.Command, args []string) {
 		loopFlag, _ := cmd.Flags().GetInt("loop")
-		n = loopFlag
+		n = loopFlag //self explaintory just how many times you want to loop.
 
 		cancontinue, tester := verification()
 		if !cancontinue {
 			return
-		}
+		} //if user does not say yes or y, stop immedatly
 		log.Info().Msg(factory.Yellow + "sending the herd! this may take a while....." + factory.Reset)
 
 		if deep {
 			n = 100
 		}
-
+		//finds all tests if any.
 		tests, err := tester.ListTests(".")
 		if err != nil {
 			log.Error().Err(err).Msg("failed to list tests")
@@ -56,37 +56,43 @@ var pigCmd = &cobra.Command{
 		if len(tests) == 0 {
 			log.Info().Msg("no tests found")
 		}
-
+		//will be editable in config file or some other means
 		if n == 10 && factory.Cfg.Defaultworkersize > 0 {
 			n = factory.Cfg.Defaultworkersize
 		}
 		totalExpectedResults := len(tests) * n
 		c := make(chan runners.TestResult, totalExpectedResults)
-		//ants is a more efficent goroutine, old way would spawn too many routines
-		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
 		// Inside your Command Run block:
-		totalExpectedResults = len(tests) * n
-		c = make(chan runners.TestResult, totalExpectedResults)
 		var wg sync.WaitGroup
 
 		// 2. Instantiate a fixed PoolWithFunc.
 		// The worker function is defined ONCE here.
+		//ants is a more efficent goroutine, old way would spawn too many routines
+		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
 		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0)*2, func(payload interface{}) {
+			//this is functional equvient to a lambda expression
+			//recive the the data from the method below
 			args := payload.(taskArgs)
-			defer args.wg.Done()
 
+			//defer just waits until we finish everything, even if it panics. prevents deadlocks.
+			defer args.wg.Done()
+			// if we do not do this, or put it at the bottom (or just lower) then the system can deadlock.
 			start := time.Now()
+			//allows process to build without risking early timeout, also prevents database deadlocks, file collisions, or shared port conflicts
+			//by pausing for a moment each process.
 			testLock.Lock()
 			result, err := args.tester.RunTest(args.testName)
 			testLock.Unlock()
 			result.Timetaken = time.Since(start)
-			log.Info().Msgf("%s", args.testName)
+			//	log.Info().Msgf("%s", args.testName)
 			if result.Testname == "" {
 				result.Testname = args.testName // Guarantee it's never a blank string
 			}
+			//stores our error if we have one
 			if err != nil {
 				result.Stderr = err.Error()
 			}
+			//adds it to channel
 			args.ch <- result
 
 		})
@@ -125,6 +131,7 @@ var pigCmd = &cobra.Command{
 	},
 }
 
+// go implictly casts a struct as an interface if an interface is requested
 type taskArgs struct {
 	testName string
 	tester   runners.TestRunner
@@ -135,13 +142,13 @@ type taskArgs struct {
 //a little messy up here, may want to break this up
 
 func results1(repo *logs.BoltRepo, testing *map[string][]runners.TestResult) {
-	if len(*testing) == 0 {
+	/*if len(*testing) == 0 {
 		fmt.Println("DEBUG: The testing map is COMPLETELY EMPTY inside results1!")
 		return
-	}
+	}*/
 
 	for testName, runs := range *testing {
-		fmt.Printf("DEBUG: Found test in map: %s with %d runs\n", testName, len(runs))
+		/*fmt.Printf("DEBUG: Found test in map: %s with %d runs\n", testName, len(runs))*/
 
 		batchResult := runners.Pig{
 			Testname: testName,
@@ -151,8 +158,8 @@ func results1(repo *logs.BoltRepo, testing *map[string][]runners.TestResult) {
 		runners.Results(&batchResult)
 
 		// Snapshot exactly what is going into the DB
-		debugBytes, _ := json.MarshalIndent(batchResult, "", "  ")
-		fmt.Printf("DEBUG: Saving to DB for key [%s]:\n%s\n", testName, string(debugBytes))
+		//debugBytes, _ := json.MarshalIndent(batchResult, "", "  ")
+		//fmt.Printf("DEBUG: Saving to DB for key [%s]:\n%s\n", testName, string(debugBytes))
 
 		err := repo.SavePig(testName, batchResult)
 		if err != nil {
@@ -161,6 +168,7 @@ func results1(repo *logs.BoltRepo, testing *map[string][]runners.TestResult) {
 	}
 }
 
+// relativilty self explaintory
 func verification() (bool, runners.TestRunner) {
 	fmt.Println("warning! this very expensive to run, are you sure you want to do this (y/n)")
 	reader := bufio.NewReader(os.Stdin)
@@ -174,7 +182,7 @@ func verification() (bool, runners.TestRunner) {
 		fmt.Printf("failed to read input: %v\n", err)
 		return false, nil
 	}
-
+	//searches top of file for testpoint
 	pig, err := factory.Testtype(l, ".")
 	if err != nil {
 		fmt.Println(err)

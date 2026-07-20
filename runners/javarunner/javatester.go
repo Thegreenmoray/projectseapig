@@ -60,86 +60,47 @@ func (g *Javatester) RunTest(testName string) (runners.TestResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
 	defer cancel()
 
-	var bin string = g.BinPath
+	bin := g.BinPath
 	var args []string
 
-	// Helper to handle Windows vs Unix local wrapper paths
-	getGradleWrapper := func() string {
-		if runtime.GOOS == "windows" {
-			return ".\\gradlew.bat"
-		}
-		return "./gradlew"
-	}
-
-	// Dynamic argument selection
-	if bin == "mvn" {
-		args = append(g.BaseArgs, "-q", "-Dtest="+testName)
-	} else if bin == "gradle" || bin == "gradlew" || strings.Contains(bin, "gradle") {
-		args = append(g.BaseArgs, "--tests", testName)
+	// 1. Build CLI args with performance flags (-q for quiet, -o for offline/no-remote-check)
+	if strings.Contains(bin, "mvn") {
+		args = append([]string{"test", "-q", "-o", "-B", "-Dtest=" + testName})
+	} else {
+		// Gradle execution
+		args = append([]string{"test", "-q", "--tests", testName})
 		if bin == "gradlew" {
-			bin = getGradleWrapper()
-		}
-	} else {
-		// Fallback detection using the structured ProjectPath
-		pomPath := filepath.Join(g.ProjectPath, "pom.xml")
-		gradlePath := filepath.Join(g.ProjectPath, "build.gradle")
-
-		if _, err := os.Stat(pomPath); err == nil {
-			bin = "mvn"
-			args = []string{"test", "-q", "-Dtest=" + testName}
-		} else if _, err := os.Stat(gradlePath); err == nil {
-			args = []string{"test", "--tests", testName}
-
-			if _, err := os.Stat(filepath.Join(g.ProjectPath, "gradlew")); err == nil {
-				bin = getGradleWrapper()
+			if runtime.GOOS == "windows" {
+				bin = ".\\gradlew.bat"
 			} else {
-				bin = "gradle"
+				bin = "./gradlew"
 			}
-		} else {
-			return runners.TestResult{
-				Testname: testName,
-				Passed:   false,
-				Stdout:   "No explicit configuration or local Maven/Gradle build file discovered.",
-			}, nil
 		}
-	}
-	var absBin string
-	// If it's a local wrapper script, resolve it relative to the project directory
-	if bin == "gradlew" || bin == "gradlew.bat" || strings.HasPrefix(bin, ".") {
-		var err error
-		absBin, err = filepath.Abs(filepath.Join(g.ProjectPath, bin))
-		if err != nil {
-			absBin = bin
-		}
-	} else {
-		// If it's a global tool like "mvn" or "gradle", let the OS look it up in %PATH%
-		absBin = bin
 	}
 
-	// Construct command execution
+	// 2. Resolve relative path for wrapper scripts
+	absBin := bin
+	if strings.HasPrefix(bin, ".") || bin == "gradlew.bat" {
+		if resolved, err := filepath.Abs(filepath.Join(g.ProjectPath, bin)); err == nil {
+			absBin = resolved
+		}
+	}
+
+	// 3. Command setup
 	cmd := exec.CommandContext(ctx, absBin, args...)
-	cmd.Dir = g.ProjectPath // Crucial fix: Forces the OS process to spawn inside your test folder
+	cmd.Dir = g.ProjectPath
 
 	if len(g.Env) > 0 {
 		cmd.Env = g.Env
 	}
 
+	start := time.Now()
 	out, err := cmd.CombinedOutput()
-	passed := err == nil
-
-	// Capture underlying OS execution errors (like file not found) for debugging
-	if err != nil && len(out) == 0 {
-		out = append(out, []byte("\n--- SEAPIG EXEC ERROR: "+err.Error()+" ---")...)
-	}
-
-	if ctx.Err() == context.DeadlineExceeded {
-		passed = false
-		out = append(out, []byte("\n--- PROJECT SEAPIG: Java execution timed out! ---")...)
-	}
 
 	return runners.TestResult{
-		Testname: testName,
-		Passed:   passed,
-		Stdout:   string(out),
+		Testname:  testName,
+		Passed:    err == nil,
+		Stdout:    string(out),
+		Timetaken: time.Since(start),
 	}, nil
 }

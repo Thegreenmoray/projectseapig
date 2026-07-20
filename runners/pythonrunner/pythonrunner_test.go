@@ -2,7 +2,7 @@ package pythonrunner
 
 import (
 	"os"
-	"os/exec"
+	//"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,9 +10,9 @@ import (
 )
 
 func TestPythonListTests_Integration(t *testing.T) {
-	if _, err := exec.LookPath("pytest"); err != nil {
-		t.Skip("Skipping integration test: 'pytest' binary not found in system PATH")
-	}
+	//	if _, err := exec.LookPath("pytest"); err != nil {
+	//		t.Skip("Skipping integration test: 'pytest' binary not found in system PATH")
+	//	}
 
 	dir := t.TempDir()
 

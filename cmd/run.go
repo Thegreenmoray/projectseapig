@@ -81,7 +81,7 @@ that SeaPig is configured correctly.`,
 }
 
 func testcollection(pig runners.TestRunner, jobs chan<- string, wg *sync.WaitGroup) {
-	defer wg.Done()
+	defer wg.Done() //input channel
 	names, err := pig.ListTests(".")
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to discover tests")
@@ -93,8 +93,8 @@ func testcollection(pig runners.TestRunner, jobs chan<- string, wg *sync.WaitGro
 }
 
 func worker(pig runners.TestRunner, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+	defer wg.Done() //output channel
+	//no need to be explict about output
 	for testName := range jobs {
 		start := time.Now()
 		result, err := pig.RunTest(testName)

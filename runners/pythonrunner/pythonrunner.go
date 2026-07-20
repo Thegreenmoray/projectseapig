@@ -2,6 +2,8 @@ package pythonrunner
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -10,20 +12,26 @@ import (
 )
 
 type Pythontester struct {
-	BinPath  string        // e.g., "/usr/local/go/bin/go" or just "go"
-	BaseArgs []string      // e.g., []string{"test", "-run"}
-	Timeout  time.Duration // Individual test execution timeout
-	Env      []string      // Custom ENV vars for the test runner process
+	ProjectPath string // Target workspace path (e.g., "C:\Users\...\Testsinpython")
+	BinPath     string // e.g., "pytest" or path to virtualenv pytest
+	BaseArgs    []string
+	Timeout     time.Duration
+	Env         []string
 }
 
 func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
 	defer cancel()
 
+	bin := g.BinPath
+	if bin == "" {
+		bin = "pytest"
+	}
+
 	// --collect-only finds all tests. -q (quiet) strips unnecessary headers.
 	args := append(g.BaseArgs, "--collect-only", "-q")
 
-	cmd := exec.CommandContext(ctx, g.BinPath, args...)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = projectPath
 	if len(g.Env) > 0 {
 		cmd.Env = g.Env
@@ -31,7 +39,7 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("python test discovery failed: %v | output: %s", err, string(out))
 	}
 
 	lines := strings.Split(string(out), "\n")
@@ -39,8 +47,6 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		// pytest output lines look like: tests/test_math.py::test_addition
-		// We filter out tracking metrics or empty lines at the bottom of quiet mode
 		if line != "" && !strings.Contains(line, "no tests ran") && strings.Contains(line, "::") {
 			tests = append(tests, line)
 		}
@@ -53,14 +59,28 @@ func (g *Pythontester) RunTest(testName string) (runners.TestResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
 	defer cancel()
 
-	// testName will look exactly like: tests/test_math.py::test_addition
-	args := append(g.BaseArgs, testName)
-
-	cmd := exec.CommandContext(ctx, g.BinPath, args...)
-	if len(g.Env) > 0 {
-		cmd.Env = g.Env
+	bin := g.BinPath
+	if bin == "" {
+		bin = "pytest"
 	}
 
+	// High-performance Pytest CLI flags:
+	defaultArgs := []string{"-q", "--no-header", "--no-summary"}
+	args := append(defaultArgs, g.BaseArgs...)
+	args = append(args, testName)
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = g.ProjectPath // CRITICAL FIX: Directs execution to target project folder
+
+	// Environment Setup: Inject PYTHONDONTWRITEBYTECODE=1 to eliminate pycache disk writes
+	env := os.Environ()
+	env = append(env, "PYTHONDONTWRITEBYTECODE=1")
+	if len(g.Env) > 0 {
+		env = append(env, g.Env...)
+	}
+	cmd.Env = env
+
+	start := time.Now()
 	out, err := cmd.CombinedOutput()
 	passed := err == nil
 
@@ -70,8 +90,9 @@ func (g *Pythontester) RunTest(testName string) (runners.TestResult, error) {
 	}
 
 	return runners.TestResult{
-		Testname: testName,
-		Passed:   passed,
-		Stdout:   string(out),
+		Testname:  testName,
+		Passed:    passed,
+		Stdout:    string(out),
+		Timetaken: time.Since(start),
 	}, nil
 }

@@ -2,6 +2,7 @@ package gorunner
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -10,30 +11,33 @@ import (
 )
 
 type Gotester struct {
-	BinPath  string        // e.g., "/usr/local/go/bin/go" or just "go"
-	BaseArgs []string      // e.g., []string{"test", "-run"}
-	Timeout  time.Duration // Individual test execution timeout
-	Env      []string      // Custom ENV vars for the test runner process
+	BinPath     string // e.g., "go"
+	ProjectPath string // e.g., "C:\Users\...\testfolder"
+	BaseArgs    []string
+	Timeout     time.Duration
+	Env         []string
 }
 
 func (g *Gotester) ListTests(projectPath string) ([]string, error) {
-	// 1. Build the arguments dynamically: start with BaseArgs, append specific flags
-	args := append(g.BaseArgs, "-list", ".", ".")
-
-	// 2. Set up a context to respect the configured timeout
 	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
 	defer cancel()
 
-	// 3. Use BinPath and your dynamic arguments
-	cmd := exec.CommandContext(ctx, g.BinPath, args...)
-	cmd.Dir = projectPath // Execute the command inside the target project directory
+	bin := g.BinPath
+	if bin == "" {
+		bin = "go"
+	}
+
+	args := []string{"test", "-list", "^Test", "./..."}
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = projectPath
 	if len(g.Env) > 0 {
 		cmd.Env = g.Env
 	}
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("go test -list failed: %v | output: %s", err, string(out))
 	}
 
 	lines := strings.Split(string(out), "\n")
@@ -41,7 +45,6 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "Test") {
-			// Clean up any potential subtest variants or output clutter
 			if parts := strings.Fields(line); len(parts) > 0 && strings.HasPrefix(parts[0], "Test") {
 				tests = append(tests, parts[0])
 			}
@@ -52,30 +55,36 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 }
 
 func (g *Gotester) RunTest(testName string) (runners.TestResult, error) {
-	// 1. Build arguments dynamically: base args + targeting the specific test
-	args := append(g.BaseArgs, "-run", "^"+testName+"$")
-
-	// 2. Use CommandContext to enforce your 5s (or configured) timeout
 	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, g.BinPath, args...)
+	bin := g.BinPath
+	if bin == "" {
+		bin = "go"
+	}
+
+	args := []string{"test", "-run", "^" + testName + "$", "-count=1", "./..."}
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = g.ProjectPath // Fixed: Now points to the actual project folder!
+
 	if len(g.Env) > 0 {
 		cmd.Env = g.Env
 	}
 
+	start := time.Now()
 	out, err := cmd.CombinedOutput()
 	passed := err == nil
 
-	// 3. Handle the scenario where the test was forcibly killed by the timeout context
 	if ctx.Err() == context.DeadlineExceeded {
 		passed = false
-		out = append(out, []byte("\n--- PROJECT SEAPIG: Test execution timed out! ---")...)
+		out = append(out, []byte("\n--- PROJECT SEAPIG: Go test execution timed out! ---")...)
 	}
 
 	return runners.TestResult{
-		Testname: testName,
-		Passed:   passed,
-		Stdout:   string(out),
+		Testname:  testName,
+		Passed:    passed,
+		Stdout:    string(out),
+		Timetaken: time.Since(start),
 	}, nil
 }

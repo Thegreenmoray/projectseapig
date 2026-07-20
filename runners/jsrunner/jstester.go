@@ -2,6 +2,8 @@ package jsrunner
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -12,33 +14,30 @@ import (
 )
 
 type JStester struct {
-	BinPath  string        // e.g., "/usr/local/go/bin/go" or just "go"
-	BaseArgs []string      // e.g., []string{"test", "-run"}
-	Timeout  time.Duration // Individual test execution timeout
-	Env      []string      // Custom ENV vars for the test runner process
+	ProjectPath string // Target workspace path (e.g., "C:\Users\...\untitled3")
+	BinPath     string // e.g., "npm" or "npx"
+	BaseArgs    []string
+	Timeout     time.Duration
+	Env         []string
 }
 
 func (j *JStester) ListTests(projectPath string) ([]string, error) {
-	// Use Jest's built-in flag via npx/npm to print individual test files
 	ctx, cancel := context.WithTimeout(context.Background(), j.Timeout)
 	defer cancel()
 
-	// Using 'npx jest --listTests' is way more accurate than globbing directories
 	cmd := exec.CommandContext(ctx, "npx", "jest", "--listTests")
-	cmd.Dir = projectPath
+	cmd.Dir = projectPath // Uses the passed parameter during discovery
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("JS test discovery failed: %v | output: %s", err, string(out))
 	}
 
 	lines := strings.Split(string(out), "\n")
 	var tests []string
-
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line != "" {
-			// Jest lists the full or relative file path to the test file
 			tests = append(tests, line)
 		}
 	}
@@ -50,15 +49,30 @@ func (j *JStester) RunTest(testName string) (runners.TestResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), j.Timeout)
 	defer cancel()
 
-	// If using the factory defaults: bin="npm", args=["test", "--", testName]
-	// This cleanly routes down to the package.json scripts configuration
-	args := append(j.BaseArgs, testName)
-
-	cmd := exec.CommandContext(ctx, j.BinPath, args...)
-	if len(j.Env) > 0 {
-		cmd.Env = j.Env
+	bin := j.BinPath
+	if bin == "" {
+		bin = "npm"
 	}
 
+	var args []string
+	if strings.Contains(bin, "npm") {
+		args = append([]string{"test", "--silent", "--"}, j.BaseArgs...)
+		args = append(args, "-t", testName, "--runInBand", "--no-coverage")
+	} else {
+		args = append(j.BaseArgs, "-t", testName, "--runInBand", "--no-coverage", "--silent")
+	}
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = j.ProjectPath // CRITICAL: Sets working dir to the project root
+
+	env := os.Environ()
+	env = append(env, "NODE_ENV=test")
+	if len(j.Env) > 0 {
+		env = append(env, j.Env...)
+	}
+	cmd.Env = env
+
+	start := time.Now()
 	out, err := cmd.CombinedOutput()
 	passed := err == nil
 
@@ -68,8 +82,9 @@ func (j *JStester) RunTest(testName string) (runners.TestResult, error) {
 	}
 
 	return runners.TestResult{
-		Testname: testName,
-		Passed:   passed,
-		Stdout:   string(out),
+		Testname:  testName,
+		Passed:    passed,
+		Stdout:    string(out),
+		Timetaken: time.Since(start),
 	}, nil
 }
