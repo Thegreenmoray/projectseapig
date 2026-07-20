@@ -38,7 +38,7 @@ func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 		return &javarunner.Javatester{
 			BinPath:     bin,
 			BaseArgs:    args,
-			Timeout:     5 * time.Second,
+			Timeout:     30 * time.Second,
 			ProjectPath: projectPath, // Pass this down so RunTest knows where to execute
 		}, nil
 	case "js":
