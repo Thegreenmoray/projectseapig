@@ -190,8 +190,7 @@ func verification() (bool, runners.TestRunner) {
 	}
 
 	if n <= 0 {
-		fmt.Printf("%d is too small, try a bigger number", n)
-		return false, nil
+		n = factory.Cfg.Defaultworkersize
 	}
 
 	return true, pig
@@ -200,7 +199,7 @@ func verification() (bool, runners.TestRunner) {
 func init() {
 	rootCmd.AddCommand(pigCmd)
 	//25 in 1.0 release but 10 for testing
-	pigCmd.Flags().IntVarP(&n, "loop", "c", 10, "How many times you want to test")
+	pigCmd.Flags().IntVarP(&n, "loop", "c", 25, "How many times you want to test")
 	pigCmd.Flags().StringVarP(&l, "lang", "a", "", "Language to run tests for (go, python, java, js)")
 	pigCmd.MarkFlagRequired("lang")
 	pigCmd.Flags().BoolVarP(&deep, "deep", "d", false, "Run deep flake detection (100 loops)")

@@ -1,6 +1,13 @@
-workers: 20
-timeout: 30s
-debug: false
-language: go
+# Sea Pig Configuration File (seapig.yaml or .seapig.yaml)
 
-#replace these with whatever you need
+# Number of concurrent test execution workers, you can specify
+#but this is just if you dont want to write --loop (number)
+workers: 20
+
+# Timeout per individual test execution (e.g. 5s, 30s, 1m)
+timeout: 30s
+
+# Enable verbose internal debugging logs
+debug: false
+
+#replace these with whatever you need. this is a template, you must make your own. 

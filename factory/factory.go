@@ -16,6 +16,11 @@ import (
 )
 
 func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
+	timeout, err := time.ParseDuration(Cfg.Timeout)
+	if err != nil || timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+
 	switch lang {
 	case "java":
 		// Set up smart defaults
@@ -38,27 +43,27 @@ func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 		return &javarunner.Javatester{
 			BinPath:     bin,
 			BaseArgs:    args,
-			Timeout:     30 * time.Second,
+			Timeout:     timeout,
 			ProjectPath: projectPath, // Pass this down so RunTest knows where to execute
 		}, nil
 	case "js":
 		return &jsrunner.JStester{
 			BinPath:  "npm",
 			BaseArgs: []string{"test", "--"},
-			Timeout:  5 * time.Second,
+			Timeout:  timeout,
 		}, nil
 	case "go":
 		return &gorunner.Gotester{
 			BinPath:  "go",
 			BaseArgs: []string{"test"},
-			Timeout:  5 * time.Second,
+			Timeout:  timeout,
 		}, nil
 	case "python":
 		// Using pytest as the default execution tool
 		return &pythonrunner.Pythontester{
 			BinPath:  "pytest",
 			BaseArgs: []string{},
-			Timeout:  5 * time.Second,
+			Timeout:  timeout,
 		}, nil
 	default:
 		return nil, errors.New("Lang not supported...")

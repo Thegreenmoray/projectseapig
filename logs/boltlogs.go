@@ -29,6 +29,45 @@ func (r *BoltRepo) Close() error {
 	return nil
 }
 
+/*
+type TestRunLog struct {
+    Timestamp time.Time     `json:"timestamp"`
+    TestName  string        `json:"test_name"`
+    Passed    bool          `json:"passed"`
+    Duration  time.Duration `json:"duration"`
+    Stdout    string        `json:"stdout"`
+}
+
+
+func (b *BoltRepo) SaveTestRun(run runners.TestResult) error {
+    return b.db.Update(func(tx *bolt.Tx) error {
+        bucket := tx.Bucket([]byte("TestHistory"))
+        if bucket == nil {
+            return fmt.Errorf("bucket not found")
+        }
+
+        logEntry := TestRunLog{
+            Timestamp: time.Now(),
+            TestName:  run.Testname,
+            Passed:    run.Passed,
+            Duration:  run.Timetaken,
+            Stdout:    run.Stdout,
+        }
+
+        data, err := json.Marshal(logEntry)
+        if err != nil {
+            return err
+        }
+
+        // Use test name + timestamp as a unique key
+        key := fmt.Sprintf("%s_%d", run.Testname, time.Now().UnixNano())
+        return bucket.Put([]byte(key), data)
+    })
+}
+//implement later.
+
+*/
+
 func (r *BoltRepo) SavePig(testName string, pig runners.Pig) error {
 	return r.db.Update(func(tx *bbolt.Tx) error {
 		// 1. Ensure the root bucket for tests exists
