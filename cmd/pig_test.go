@@ -149,9 +149,9 @@ func TestPigCmd_Results_Coverage(t *testing.T) {
 	mockData := map[string][]runners.TestResult{
 		"TestMath_Addition": mockRuns,
 	}
-
+	fakestring := make(map[string]string)
 	// 4. Fire the function using your initialized test repo!
-	results1(testRepo, &mockData)
+	results1(fakestring, testRepo, mockData)
 
 	// 5. Basic sanity validation assertions
 	if len(mockData) != 1 {

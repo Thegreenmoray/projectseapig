@@ -33,7 +33,7 @@ func TestSavePig(t *testing.T) {
 
 	pig := runners.Pig{Testname: "randomtest"}
 
-	if err := repo.SavePig("randomtest", pig); err != nil {
+	if err := repo.SavePig("randomtest", &pig); err != nil {
 		t.Errorf("Expected nil error, got %v", err)
 	}
 }

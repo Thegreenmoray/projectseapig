@@ -33,7 +33,7 @@ func TestLogsCommand_Test(t *testing.T) {
 			{Testname: "TestMath", Passed: false, Stdout: "panic!"},
 		},
 	}
-	_ = repo.SavePig("TestMath", mockPig)
+	_ = repo.SavePig("TestMath", &mockPig)
 	repo.Close() // Release lock so cmd can read it read-only
 
 	// 2. Test 'seapig logs' (Runs showSummary)

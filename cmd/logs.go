@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/Justi/projectseapig/runners"
 	"github.com/spf13/cobra"
@@ -45,8 +46,8 @@ func showSummary(db *bbolt.DB) {
 			return nil
 		}
 
-		fmt.Printf("%-50s %-15s %-10s\n", "TEST NAME", "FLAKE RATE", "PASS/FAIL")
-		fmt.Println("---------------------------------------------------------------------------------")
+		//fmt.Printf("%-50s %-15s %-10s\n", "TEST NAME", "FLAKE RATE", "PASS/FAIL")
+		//fmt.Println("---------------------------------------------------------------------------------")
 
 		// Iterate through every record in the bucket
 		return bucket.ForEach(func(k, v []byte) error {
@@ -57,7 +58,18 @@ func showSummary(db *bbolt.DB) {
 
 			// Format and print a clean summary line
 			status := fmt.Sprintf("%d/%d", p.PassCount, p.FailCount+p.PassCount)
-			fmt.Printf("%-50s %-15.2f%% %-10s\n", p.Testname, p.Flakynessrate, status)
+			fmt.Printf("%-35s %-10.2f%% %-10s %-25s\n", p.Testname, p.Flakynessrate, status, p.Dateandtime)
+			if p.Errorlog != "" {
+				fmt.Printf("   └─ Error Output:\n")
+				lines := strings.Split(p.Errorlog, "\n")
+				for _, line := range lines {
+					if strings.TrimSpace(line) != "" {
+						fmt.Printf("      | %s\n", line)
+					}
+				}
+				fmt.Println() // Add spacing between detailed entries
+			}
+
 			return nil
 		})
 	})

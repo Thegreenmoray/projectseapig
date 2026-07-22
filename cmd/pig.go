@@ -118,15 +118,25 @@ var pigCmd = &cobra.Command{
 			close(c)
 			pool.Release()
 		}()
-
+		errorOutputs := make(map[string]string)
 		testing := make(map[string][]runners.TestResult)
+
 		for f := range c {
+			// If this specific run failed and we don't have an error captured for this test yet
+			if !f.Passed && errorOutputs[f.Testname] == "" {
+				if len(f.Stdout) != 0 {
+					errorOutputs[f.Testname] = f.Stdout
+				} else if len(f.Stderr) != 0 {
+					errorOutputs[f.Testname] = f.Stderr
+				}
+			}
+
 			testing[f.Testname] = append(testing[f.Testname], f)
 		}
 		repo, _ := logs.NewBoltRepo("seapig.db")
 		defer repo.Close()
 
-		results1(repo, &testing)
+		results1(errorOutputs, repo, testing)
 
 	},
 }
@@ -141,31 +151,22 @@ type taskArgs struct {
 
 //a little messy up here, may want to break this up
 
-func results1(repo *logs.BoltRepo, testing *map[string][]runners.TestResult) {
-	/*if len(*testing) == 0 {
-		fmt.Println("DEBUG: The testing map is COMPLETELY EMPTY inside results1!")
-		return
-	}*/
-
-	for testName, runs := range *testing {
-		/*fmt.Printf("DEBUG: Found test in map: %s with %d runs\n", testName, len(runs))*/
-
+func results1(errorOutputs map[string]string, repo *logs.BoltRepo, testing map[string][]runners.TestResult) {
+	for testName, runs := range testing {
 		batchResult := runners.Pig{
-			Testname: testName,
-			Run:      runs,
+			Testname:    testName,
+			Run:         runs,
+			Errorlog:    errorOutputs[testName], // 👈 Grab error specific to THIS test
+			Dateandtime: time.Now().Format(time.RFC3339),
 		}
 
 		runners.Results(&batchResult)
 
-		// Snapshot exactly what is going into the DB
-		//debugBytes, _ := json.MarshalIndent(batchResult, "", "  ")
-		//fmt.Printf("DEBUG: Saving to DB for key [%s]:\n%s\n", testName, string(debugBytes))
-
-		err := repo.SavePig(testName, batchResult)
-		if err != nil {
-			log.Error().Err(err).Msgf("failed to save logs for %s", testName)
+		if err := repo.SavePig(testName, &batchResult); err != nil {
+			log.Error().Err(err).Msgf(factory.Red+"failed to save logs for %s", testName)
 		}
 	}
+	log.Info().Msg(factory.Green + "The Herd has finished." + factory.Reset)
 }
 
 // relativilty self explaintory
