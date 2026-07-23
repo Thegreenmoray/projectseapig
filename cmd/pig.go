@@ -57,8 +57,8 @@ var pigCmd = &cobra.Command{
 			log.Info().Msg("no tests found")
 		}
 		//will be editable in config file or some other means
-		if n == 10 && factory.Cfg.Defaultworkersize > 0 {
-			n = factory.Cfg.Defaultworkersize
+		if n == 10 && factory.Cfg.Workers > 0 {
+			n = factory.Cfg.Workers
 		}
 		totalExpectedResults := len(tests) * n
 		c := make(chan runners.TestResult, totalExpectedResults)
@@ -191,7 +191,7 @@ func verification() (bool, runners.TestRunner) {
 	}
 
 	if n <= 0 {
-		n = factory.Cfg.Defaultworkersize
+		n = factory.Cfg.Workers
 	}
 
 	return true, pig

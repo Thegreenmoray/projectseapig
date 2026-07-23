@@ -1,10 +1,9 @@
 package factory
 
 type config struct {
-	Defaultworkersize int
-	Timeout           string
-	Isdebug           bool
-	Lang              string
+	Workers int    `mapstructure:"workers"`
+	Timeout string `mapstructure:"timeout"`
+	Debug   bool   `mapstructure:"debug"`
 }
 
 var Cfg config

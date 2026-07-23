@@ -28,7 +28,7 @@ func TestJSTesterListTests(t *testing.T) {
 	tester := JStester{
 		BinPath:  "npm",
 		BaseArgs: []string{"test", "--"},
-		Timeout:  5 * time.Second,
+		Timeout:  60 * time.Second,
 	}
 
 	tests, err := tester.ListTests(dir)

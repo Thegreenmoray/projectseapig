@@ -19,7 +19,12 @@ type Gotester struct {
 }
 
 func (g *Gotester) ListTests(projectPath string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
+	discoveryTimeout := g.Timeout
+	if discoveryTimeout < 60*time.Second {
+		discoveryTimeout = 60 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout)
 	defer cancel()
 
 	bin := g.BinPath
@@ -27,28 +32,41 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 		bin = "go"
 	}
 
-	args := []string{"test", "-list", "^Test", "./..."}
-
-	cmd := exec.CommandContext(ctx, bin, args...)
+	// Try scanning all subpackages
+	cmd := exec.CommandContext(ctx, bin, "test", "-list", ".*", "./...")
 	cmd.Dir = projectPath
-	if len(g.Env) > 0 {
-		cmd.Env = g.Env
-	}
 
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("go test -list failed: %v | output: %s", err, string(out))
-	}
 
+	// Parse whatever output was generated
 	lines := strings.Split(string(out), "\n")
 	var tests []string
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Test") {
+		if parts := strings.Fields(line); len(parts) > 0 && strings.HasPrefix(parts[0], "Test") {
+			tests = append(tests, parts[0])
+		}
+	}
+
+	// If subpackages failed, attempt listing the local directory package
+	if len(tests) == 0 {
+		cmdLocal := exec.CommandContext(ctx, bin, "test", "-list", ".*", ".")
+		cmdLocal.Dir = projectPath
+		outLocal, errLocal := cmdLocal.CombinedOutput()
+		if errLocal != nil && len(outLocal) == 0 {
+			return nil, fmt.Errorf("go test -list failed: %v | output: %s", err, string(out))
+		}
+
+		for _, line := range strings.Split(string(outLocal), "\n") {
+			line = strings.TrimSpace(line)
 			if parts := strings.Fields(line); len(parts) > 0 && strings.HasPrefix(parts[0], "Test") {
 				tests = append(tests, parts[0])
 			}
 		}
+	}
+
+	if len(tests) == 0 {
+		return nil, fmt.Errorf("no test functions starting with 'Test' found in %s", projectPath)
 	}
 
 	return tests, nil

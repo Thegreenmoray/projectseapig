@@ -5,7 +5,7 @@
 workers: 20
 
 # Timeout per individual test execution (e.g. 5s, 30s, 1m)
-timeout: 30s
+timeout: 1m
 
 # Enable verbose internal debugging logs
 debug: false

@@ -48,6 +48,11 @@ func TestFactory(t *testing.T) {
 		fmt.Printf("Is %s", golang)
 	}
 
+	_, er := Testtype("", ".")
+	if er != nil {
+		fmt.Printf("failed as expected")
+	}
+
 }
 
 func TestColors(t *testing.T) {

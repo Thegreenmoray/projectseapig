@@ -27,6 +27,7 @@ func TestRootCommand(t *testing.T) {
 		t.Fatalf("command failed: %v", err)
 	}
 }
+
 //why isnt this being counted in coverage?
 
 func TestPigcommand(t *testing.T) {
