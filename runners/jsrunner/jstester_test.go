@@ -26,8 +26,8 @@ func TestJSTesterListTests(t *testing.T) {
 
 	// Initialize the tester with your factory style defaults
 	tester := JStester{
-		BinPath:  "npm",
-		BaseArgs: []string{"test", "--"},
+		BinPath:  "npx",
+		BaseArgs: []string{"jest", "--roots", dir, "--listTests"},
 		Timeout:  60 * time.Second,
 	}
 

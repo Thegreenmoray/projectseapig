@@ -2,6 +2,7 @@ package javarunner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,8 +23,61 @@ type Javatester struct {
 }
 
 func (g *Javatester) ListTests(projectPath string) ([]string, error) {
+	if g.Timeout <= 0 {
+		return nil, fmt.Errorf("Time is too short, please enter something larger than 0")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
+	defer cancel()
+
 	var tests []string
 
+	// Target the standard Java test source directory
+	testRoot := filepath.Join(projectPath, "src", "test", "java")
+	searchPath := projectPath
+	if _, err := os.Stat(testRoot); err == nil {
+		searchPath = testRoot
+	}
+
+	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Check if the timeout context was canceled during a long walk
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("java test discovery timed out after %v while scanning file tree", g.Timeout)
+		default:
+		}
+
+		if !info.IsDir() && strings.HasSuffix(info.Name(), "Test.java") {
+			relPath, err := filepath.Rel(searchPath, path)
+			if err != nil {
+				return err
+			}
+
+			cleanPath := strings.TrimSuffix(relPath, ".java")
+			fqcn := strings.ReplaceAll(cleanPath, string(os.PathSeparator), ".")
+
+			tests = append(tests, fqcn)
+		}
+		return nil
+	})
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("java test discovery timed out after %v while scanning file tree", g.Timeout)
+	}
+
+	return tests, err
+}
+
+/*func (g *Javatester) ListTests(projectPath string) ([]string, error) {
+	var tests []string
+
+	if g.Timeout <= 0 {
+		return nil, fmt.Errorf("Time is too short, please enter something larger than 0")
+	}
 	// Target the standard Java test source directory
 	testRoot := filepath.Join(projectPath, "src", "test", "java")
 
@@ -54,7 +108,7 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 	})
 
 	return tests, err
-}
+}*/
 
 func (g *Javatester) RunTest(testName string) (runners.TestResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)

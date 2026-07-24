@@ -2,6 +2,7 @@ package pythonrunner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +21,10 @@ type Pythontester struct {
 }
 
 func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
+	if g.Timeout <= 0 {
+		return nil, fmt.Errorf("Time is too short, please enter something larger than 0")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
 	defer cancel()
 
@@ -39,6 +44,12 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		// 1. Check specifically for context timeout
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("test discovery timed out after %v. A Python test file may be executing heavy code or network calls at module import time instead of inside a fixture", g.Timeout)
+		}
+
+		// 2. Fall back to standard command failure (syntax error, missing pytest, etc.)
 		return nil, fmt.Errorf("python test discovery failed: %v | output: %s", err, string(out))
 	}
 

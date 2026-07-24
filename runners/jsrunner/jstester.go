@@ -22,6 +22,9 @@ type JStester struct {
 }
 
 func (j *JStester) ListTests(projectPath string) ([]string, error) {
+	if j.Timeout <= 0 {
+		return nil, fmt.Errorf("Time is too short, please enter something larger than 0")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), j.Timeout)
 	defer cancel()
 

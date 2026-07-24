@@ -18,7 +18,7 @@ import (
 var logsCmd = &cobra.Command{
 	Use:   "logs",
 	Short: "View test logs",
-	Long:  `View the logs of your test runs. This command reads from the local database and displays a summary of test results, including flakiness rates and pass/fail counts.`,
+	Long:  `View the logs of your test runs. This command reads from the local database and displays a summary of test results, including flakiness rates and pass/fail counts, as well as the first failure of that test that occured if any.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("logs called")
 		db, err := bbolt.Open("seapig.db", 0600, &bbolt.Options{ReadOnly: true})
@@ -27,13 +27,13 @@ var logsCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		if len(args) > 0 {
-			// User specified a specific test, show detailed runs
-			showDetailedLogs(db, args[0])
-		} else {
-			// User just typed 'seapig logs', show a summary of everything
-			showSummary(db)
-		}
+		//if len(args) > 0 {
+		// User specified a specific test, show detailed runs
+		//showDetailedLogs(db, args[0])
+		//} else {
+		// User just typed 'seapig logs', show a summary of everything
+		showSummary(db)
+		//}
 
 	},
 }
@@ -79,6 +79,8 @@ func showSummary(db *bbolt.DB) {
 	}
 }
 
+//save this for ver 1.1
+/*
 func showDetailedLogs(db *bbolt.DB, targetTest string) {
 	err := db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte("TestHistory"))
@@ -147,8 +149,9 @@ func showDetailedLogs(db *bbolt.DB, targetTest string) {
 		log.Fatalf("Error reading detailed logs: %v", err)
 	}
 }
-
+*/
 func init() {
 	rootCmd.AddCommand(logsCmd)
 	//it just prints logs no need for anything else
+	//add the ability to view spefic logs in ver 1.1
 }

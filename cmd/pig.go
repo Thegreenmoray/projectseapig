@@ -18,6 +18,7 @@ import (
 	"github.com/Justi/projectseapig/runners"
 	"github.com/panjf2000/ants/v2"
 	"github.com/rs/zerolog/log"
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -41,6 +42,7 @@ var pigCmd = &cobra.Command{
 		if !cancontinue {
 			return
 		} //if user does not say yes or y, stop immedatly
+
 		log.Info().Msg(factory.Yellow + "sending the herd! this may take a while....." + factory.Reset)
 
 		if deep {
@@ -60,30 +62,57 @@ var pigCmd = &cobra.Command{
 		if n == 10 && factory.Cfg.Workers > 0 {
 			n = factory.Cfg.Workers
 		}
+
 		totalExpectedResults := len(tests) * n
 		c := make(chan runners.TestResult, totalExpectedResults)
-		// Inside your Command Run block:
+
+		bar := progressbar.NewOptions(totalExpectedResults,
+			progressbar.OptionEnableColorCodes(true),
+			progressbar.OptionSetWidth(15),
+			progressbar.OptionSetDescription("[seapig] Running tests..."),
+			progressbar.OptionShowCount(),
+			progressbar.OptionShowIts(),
+			progressbar.OptionSetItsString("tests"),
+			progressbar.OptionOnCompletion(func() {
+				fmt.Println("\n[seapig] Finished running test queue!")
+			}),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "[green]=[reset]",
+				SaucerHead:    "[green]>[reset]",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}),
+		)
+
 		var wg sync.WaitGroup
 
 		// 2. Instantiate a fixed PoolWithFunc.
 		// The worker function is defined ONCE here.
-		//ants is a more efficent goroutine, old way would spawn too many routines
+		//ants is a more efficent goroutine, old way would spawn too many goroutines
 		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
 		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0)*2, func(payload interface{}) {
+
 			//this is functional equvient to a lambda expression
 			//recive the the data from the method below
 			args := payload.(taskArgs)
 
 			//defer just waits until we finish everything, even if it panics. prevents deadlocks.
 			defer args.wg.Done()
+
 			// if we do not do this, or put it at the bottom (or just lower) then the system can deadlock.
 			start := time.Now()
+
 			//allows process to build without risking early timeout, also prevents database deadlocks, file collisions, or shared port conflicts
 			//by pausing for a moment each process.
 			testLock.Lock()
+
 			result, err := args.tester.RunTest(args.testName)
+
 			testLock.Unlock()
+
 			result.Timetaken = time.Since(start)
+
 			//	log.Info().Msgf("%s", args.testName)
 			if result.Testname == "" {
 				result.Testname = args.testName // Guarantee it's never a blank string
@@ -94,6 +123,12 @@ var pigCmd = &cobra.Command{
 			}
 			//adds it to channel
 			args.ch <- result
+
+			// -------------------------------------------------------------
+			// 👉 INCREMENT PROGRESS BAR HERE
+			// schollz/progressbar is thread-safe, so workers can call it directly
+			// -------------------------------------------------------------
+			_ = bar.Add(1)
 
 		})
 
@@ -118,10 +153,12 @@ var pigCmd = &cobra.Command{
 			close(c)
 			pool.Release()
 		}()
+
 		errorOutputs := make(map[string]string)
 		testing := make(map[string][]runners.TestResult)
 
 		for f := range c {
+
 			// If this specific run failed and we don't have an error captured for this test yet
 			if !f.Passed && errorOutputs[f.Testname] == "" {
 				if len(f.Stdout) != 0 {
@@ -141,6 +178,8 @@ var pigCmd = &cobra.Command{
 	},
 }
 
+//a little messy up here, may want to break this up
+
 // go implictly casts a struct as an interface if an interface is requested
 type taskArgs struct {
 	testName string
@@ -148,8 +187,6 @@ type taskArgs struct {
 	ch       chan<- runners.TestResult
 	wg       *sync.WaitGroup
 }
-
-//a little messy up here, may want to break this up
 
 func results1(errorOutputs map[string]string, repo *logs.BoltRepo, testing map[string][]runners.TestResult) {
 	for testName, runs := range testing {

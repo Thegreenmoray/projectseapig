@@ -2,7 +2,7 @@
 
 # Number of concurrent test execution workers, you can specify
 #but this is just if you dont want to write --loop (number)
-workers: 20
+workers: 10
 
 # Timeout per individual test execution (e.g. 5s, 30s, 1m)
 timeout: 1m

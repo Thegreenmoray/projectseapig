@@ -20,8 +20,8 @@ type Gotester struct {
 
 func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	discoveryTimeout := g.Timeout
-	if discoveryTimeout < 60*time.Second {
-		discoveryTimeout = 60 * time.Second
+	if g.Timeout <= 0 {
+		return nil, fmt.Errorf("Time is too short, please enter something larger than 0")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout)
