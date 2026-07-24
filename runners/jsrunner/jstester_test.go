@@ -1,9 +1,11 @@
 package jsrunner
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,7 +18,7 @@ func TestJSTesterListTests(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// 2. Create minimal package.json and jest config so Jest doesn't crash
+	// 2. Create minimal package.json
 	packageJSON := []byte(`{"name": "test-project", "private": true}`)
 	_ = os.WriteFile(filepath.Join(dir, "package.json"), packageJSON, 0644)
 
@@ -24,28 +26,53 @@ func TestJSTesterListTests(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "math.test.js"), []byte("test('stub', () => {});"), 0644)
 	_ = os.WriteFile(filepath.Join(dir, "utils.spec.js"), []byte("test('stub', () => {});"), 0644)
 
-	// Initialize the tester with your factory style defaults
+	// Explicitly constrain Jest roots using a minimal JSON config string
+	jestConfig := fmt.Sprintf(`{"rootDir": "%s", "roots": ["%s"]}`,
+		filepath.ToSlash(dir),
+		filepath.ToSlash(dir),
+	)
+
 	tester := JStester{
 		BinPath:  "npx",
-		BaseArgs: []string{"jest", "--roots", dir, "--listTests"},
+		BaseArgs: []string{"jest", "--config", jestConfig, "--listTests"},
 		Timeout:  60 * time.Second,
 	}
 
 	tests, err := tester.ListTests(dir)
 	if err != nil {
-		// If Jest isn't installed in this specific environment, skip gracefully
-		// instead of failing the CI pipeline build
 		t.Skipf("Skipping: local environment missing node_modules or jest configuration: %v", err)
 		return
 	}
 
-	if len(tests) != 2 {
-		t.Errorf("Expected 2 tests, got %d", len(tests))
+	// Filter to strictly verify tests belonging inside t.TempDir()
+	var localTests []string
+	cleanTempDir := filepath.Clean(dir)
+
+	for _, testPath := range tests {
+		cleanPath := filepath.Clean(testPath)
+		if strings.HasPrefix(cleanPath, cleanTempDir) {
+			localTests = append(localTests, cleanPath)
+		}
+	}
+
+	if len(localTests) != 2 {
+		t.Errorf("Expected 2 tests in temp dir, got %d (All discovered: %v)", len(localTests), tests)
 	}
 }
 
 func TestJSTesterRunTest(t *testing.T) {
-	tester := JStester{}
+	dir := t.TempDir()
+
+	jestConfig := fmt.Sprintf(`{"rootDir": "%s", "roots": ["%s"]}`,
+		filepath.ToSlash(dir),
+		filepath.ToSlash(dir),
+	)
+
+	tester := JStester{
+		BinPath:  "npx",
+		BaseArgs: []string{"jest", "--config", jestConfig, "--listTests"},
+		Timeout:  60 * time.Second,
+	}
 	result, _ := tester.RunTest("math.test.js")
 
 	if result.Testname != "math.test.js" {
