@@ -3,7 +3,9 @@ package gorunner
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,6 +36,17 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 
 	// Try scanning all subpackages
 	cmd := exec.CommandContext(ctx, bin, "test", "-list", ".*", "./...")
+	projectPath = filepath.Clean(projectPath)
+	info, err := os.Stat(projectPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("project path does not exist: %s", projectPath)
+		}
+		return nil, fmt.Errorf("error accessing project path: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
+	}
 	cmd.Dir = projectPath
 
 	out, err := cmd.CombinedOutput()

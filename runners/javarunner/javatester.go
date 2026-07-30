@@ -31,6 +31,17 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 	defer cancel()
 
 	var tests []string
+	projectPath = filepath.Clean(projectPath)
+	info, err := os.Stat(projectPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("project path does not exist: %s", projectPath)
+		}
+		return nil, fmt.Errorf("error accessing project path: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
+	}
 
 	// Target the standard Java test source directory
 	testRoot := filepath.Join(projectPath, "src", "test", "java")
@@ -39,7 +50,7 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 		searchPath = testRoot
 	}
 
-	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -71,44 +82,6 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 
 	return tests, err
 }
-
-/*func (g *Javatester) ListTests(projectPath string) ([]string, error) {
-	var tests []string
-
-	if g.Timeout <= 0 {
-		return nil, fmt.Errorf("Time is too short, please enter something larger than 0")
-	}
-	// Target the standard Java test source directory
-	testRoot := filepath.Join(projectPath, "src", "test", "java")
-
-	searchPath := projectPath
-	if _, err := os.Stat(testRoot); err == nil {
-		searchPath = testRoot
-	}
-
-	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !info.IsDir() && strings.HasSuffix(info.Name(), "Test.java") {
-			// Get the relative path from the test root (e.g., "org/example/FlakyTest.java")
-			relPath, err := filepath.Rel(searchPath, path)
-			if err != nil {
-				return err
-			}
-
-			// Strip ".java" and convert directory slashes (\ or /) into package dots
-			cleanPath := strings.TrimSuffix(relPath, ".java")
-			fqcn := strings.ReplaceAll(cleanPath, string(os.PathSeparator), ".")
-
-			tests = append(tests, fqcn)
-		}
-		return nil
-	})
-
-	return tests, err
-}*/
 
 func (g *Javatester) RunTest(testName string) (runners.TestResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)

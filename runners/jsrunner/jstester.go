@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,6 +30,17 @@ func (j *JStester) ListTests(projectPath string) ([]string, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "npx", "jest", "--listTests")
+	projectPath = filepath.Clean(projectPath)
+	info, err := os.Stat(projectPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("project path does not exist: %s", projectPath)
+		}
+		return nil, fmt.Errorf("error accessing project path: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
+	}
 	cmd.Dir = projectPath // Uses the passed parameter during discovery
 
 	out, err := cmd.CombinedOutput()

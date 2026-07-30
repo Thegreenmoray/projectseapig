@@ -208,6 +208,9 @@ func results1(errorOutputs map[string]string, repo *logs.BoltRepo, testing map[s
 
 // relativilty self explaintory
 func verification() (bool, runners.TestRunner) {
+	if n <= 0 {
+		fmt.Println("Invaild numbers detected, using default values")
+	}
 	fmt.Println("warning! this very expensive to run, are you sure you want to do this (y/n)")
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')

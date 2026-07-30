@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,6 +38,17 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 	args := append(g.BaseArgs, "--collect-only", "-q")
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	projectPath = filepath.Clean(projectPath)
+	info, err := os.Stat(projectPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("project path does not exist: %s", projectPath)
+		}
+		return nil, fmt.Errorf("error accessing project path: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
+	}
 	cmd.Dir = projectPath
 	if len(g.Env) > 0 {
 		cmd.Env = g.Env
