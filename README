@@ -1,77 +1,84 @@
-🐷 Sea Pig: 
-A tool for developers to detect flaky unit tests, Flaky tests refers to tests that produce nondeterministic results for the same input. Flaky tests waste time and money, cause developer frustration, and cause uncertainty in testing. Sea Pig detects flaky tests before hitting CI
+# 🐷 Sea Pig (`seapig`)
+
+> **Detect flaky unit tests locally before they hit your CI pipeline.**
+
+Flaky tests produce non-deterministic results for the exact same code and input. They waste developer time, clog up pull requests, burn CI budgets, and erode trust in your test suite. **Sea Pig** isolates and flags non-deterministic tests directly on your local machine before you commit.
+
+---
+
+## ⭐ Why Sea Pig?
+
+| Traditional Flake Detectors | 🐷 Sea Pig |
+| :--- | :--- |
+| Closed source / Proprietary | **100% Open-Source (Apache 2.0)** |
+| Expensive SaaS subscriptions | **Local-First & Free** |
+| Tied strictly to CI/CD pipelines | **Runs instantly in your local terminal** |
+| Single-language focus | **Language Agnostic** |
+
+---
+
+## 🧪 How It Works
+
+Sea Pig executes your unit test suite concurrently across multiple loop iterations under identical inputs. If a test passes on one run and fails on another, Sea Pig immediately flags it as **flaky**, pinpoints the exact test case, and logs the result to a local embeddable database (`bbolt`).
+
+---
+
+## 💻 Language Support
+
+### 🔧 Supported in v1.0
+* 🟦 **Go** (`go`)
+* 🐍 **Python** (`pytest`)
+* ☕ **Java** (`JUnit` / Maven / Gradle)
+* 🟡 **JavaScript** (`npm test`)
+
+### 🚀 Planned Future Languages
+Kotlin • TypeScript • Ruby • PHP • Elixir • C# / .NET • Swift • Dart / Flutter • Rust • C / C++
+
+---
+
+## 🚀 Quickstart & Commands
+
+```bash
+# 1. Check supported languages and keywords
+seapig list
+
+# 2. Run a single sanity test execution
+seapig run --lang java
+
+# 3. Execute Sea Pig flake detection (default: 25 loops)
+seapig pig --lang java --loop 5
+
+# 4. View stored execution history and logs
+seapig logs
+
+⚙️ Configuration (seapig.yaml)
+You can customize execution defaults by placing a seapig.yaml file in the root directory alongside your seapig executable:
+
+YAML
+# Number of concurrent test execution workers / default loop runs
+workers: 10
+
+# Timeout per individual test execution (e.g. 5s, 30s, 1m)
+timeout: 1m
+Note: Running seapig from the root directory of your project delivers the best auto-discovery results.
+
+⚠️ Known Issues & Troubleshooting
+Windows OneDrive File Sync
+Issue: seapig may occasionally fail or experience file access errors when run inside folders actively synced by Windows OneDrive.
+
+Workaround:
+
+Move your local repository outside of the OneDrive sync path (e.g., C:\dev\your-project).
+
+Alternatively, temporarily pause OneDrive syncing while running test suites.
+
+☕ Support the Project
+Buy Me A Coffee link coming soon!
+
+Test footage of Sea Pig:
+
+https://www.youtube.com/watch?v=7Xn6TFFPGpM
 
 
-⭐Why Sea Pig:
 
 
-Most other flake detectors are
-* closed source
-* Paid Saas
-* Attached to CI pipelines
-* one language only
-
-
-Sea pig is:
-
-
-* Language agnostic
-* Local-first
-* Open-Source
-* Simple and for developers
-
-
-🧪 How it works:
-Sea pig will run unit tests with the same input multiple times to detect nondeterminism. If flakiness is detected (tests sometimes pass, but other times fail) sea pig flags it and points to what tests are flaky.
-
-
-🔧 Current planned support (v1.0)
-Go
-
-
-Python
-
-
-Java
-
-
-JavaScript
-
-
-🚀 Future language support (earliest → latest)
-Kotlin
-
-
-TypeScript
-
-
-Ruby
-
-
-PHP
-
-
-Elixir
-
-
-C# / .NET
-
-
-Swift
-
-
-Dart / Flutter
-
-
-Rust
-
-
-C / C++
-
-
-📌 Project Status
-Sea Pig is currently in early development.
-More updates, documentation, and examples will be added as the project evolves.
-
-buymeacoffee link:
-Soon
