@@ -73,11 +73,25 @@ Move your local repository outside of the OneDrive sync path (e.g., C:\dev\your-
 Alternatively, temporarily pause OneDrive syncing while running test suites.
 
 ☕ Support the Project
-Buy Me A Coffee link coming soon!
+https://buymeacoffee.com/thegreenmoray
+
 
 Test footage of Sea Pig:
 
-https://www.youtube.com/watch?v=7Xn6TFFPGpM
+https://www.youtube.com/watch?v=Tv9dF2q3now&t=40s
+
+## 📥 Installation
+
+1. Go to the [Latest Releases](https://github.com/Thegreenmoray/seapig/releases/latest) page.
+2. Download the binary matching your operating system:
+   * **Windows:** `seapig-windows-amd64.exe`
+   * **macOS (Apple Silicon M1/M2/M3):** `seapig-darwin-arm64`
+   * **macOS (Intel):** `seapig-darwin-amd64`
+   * **Linux:** `seapig-linux-amd64`
+3. *(Linux/macOS only)* Make the file executable:
+   ```bash
+   chmod +x seapig-darwin-arm64
+   mv seapig-darwin-arm64 /usr/local/bin/seapig
 
 
 
