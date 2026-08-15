@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/Justi/projectseapig/runners"
 )
 
 type Gotester struct {
@@ -83,39 +81,4 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	}
 
 	return tests, nil
-}
-
-func (g *Gotester) RunTest(testName string) (runners.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
-	defer cancel()
-
-	bin := g.BinPath
-	if bin == "" {
-		bin = "go"
-	}
-
-	args := []string{"test", "-run", "^" + testName + "$", "-count=1", "./..."}
-
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = g.ProjectPath // Fixed: Now points to the actual project folder!
-
-	if len(g.Env) > 0 {
-		cmd.Env = g.Env
-	}
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	passed := err == nil
-
-	if ctx.Err() == context.DeadlineExceeded {
-		passed = false
-		out = append(out, []byte("\n--- PROJECT SEAPIG: Go test execution timed out! ---")...)
-	}
-
-	return runners.TestResult{
-		Testname:  testName,
-		Passed:    passed,
-		Stdout:    string(out),
-		Timetaken: time.Since(start),
-	}, nil
 }

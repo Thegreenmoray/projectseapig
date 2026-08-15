@@ -19,15 +19,3 @@ func TestGoListTests(t *testing.T) {
 		t.Fatal("expected at least one Go test")
 	}
 }
-
-func TestGoRunTest(t *testing.T) {
-	g := Gotester{BinPath: "go",
-		BaseArgs: []string{"test"},
-		Timeout:  5 * time.Second,
-	}
-	result, _ := g.RunTest("TestAdd")
-
-	if result.Testname != "TestAdd" {
-		t.Fatalf("expected TestAdd, got %s", result.Testname)
-	}
-}

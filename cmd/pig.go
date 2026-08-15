@@ -62,6 +62,9 @@ var pigCmd = &cobra.Command{
 		if n == 10 && factory.Cfg.Workers > 0 {
 			n = factory.Cfg.Workers
 		}
+		//do greedy scheduling right around here, wether as a function or here, this will do it
+		//though in general we probably want to break this into several functions in order to make it more readable
+		//and maintainable, but for now this is fine.
 
 		totalExpectedResults := len(tests) * n
 		c := make(chan runners.TestResult, totalExpectedResults)
@@ -100,9 +103,6 @@ var pigCmd = &cobra.Command{
 			//defer just waits until we finish everything, even if it panics. prevents deadlocks.
 			defer args.wg.Done()
 
-			// if we do not do this, or put it at the bottom (or just lower) then the system can deadlock.
-			start := time.Now()
-
 			//allows process to build without risking early timeout, also prevents database deadlocks, file collisions, or shared port conflicts
 			//by pausing for a moment each process.
 			testLock.Lock()
@@ -110,8 +110,6 @@ var pigCmd = &cobra.Command{
 			result, err := args.tester.RunTest(args.testName)
 
 			testLock.Unlock()
-
-			result.Timetaken = time.Since(start)
 
 			//	log.Info().Msgf("%s", args.testName)
 			if result.Testname == "" {
@@ -241,7 +239,7 @@ func init() {
 	rootCmd.AddCommand(pigCmd)
 	//25 in 1.0 release but 10 for testing
 	pigCmd.Flags().IntVarP(&n, "loop", "c", 25, "How many times you want to test")
-	pigCmd.Flags().StringVarP(&l, "lang", "a", "", "Language to run tests for (go, python, java, js)")
+	pigCmd.Flags().StringVarP(&l, "lang", "a", "", "Language to run tests for (go, python, java, js, other)")
 	pigCmd.MarkFlagRequired("lang")
 	pigCmd.Flags().BoolVarP(&deep, "deep", "d", false, "Run deep flake detection (100 loops)")
 }

@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
+
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
-
-	"github.com/Justi/projectseapig/runners"
 	// Ensure your runners import is here
 )
 
@@ -81,53 +78,4 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 	}
 
 	return tests, err
-}
-
-func (g *Javatester) RunTest(testName string) (runners.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
-	defer cancel()
-
-	bin := g.BinPath
-	var args []string
-
-	// 1. Build CLI args with performance flags (-q for quiet, -o for offline/no-remote-check)
-	if strings.Contains(bin, "mvn") {
-		args = append([]string{"test", "-q", "-o", "-B", "-Dtest=" + testName})
-	} else {
-		// Gradle execution
-		args = append([]string{"test", "-q", "--tests", testName})
-		if bin == "gradlew" {
-			if runtime.GOOS == "windows" {
-				bin = ".\\gradlew.bat"
-			} else {
-				bin = "./gradlew"
-			}
-		}
-	}
-
-	// 2. Resolve relative path for wrapper scripts
-	absBin := bin
-	if strings.HasPrefix(bin, ".") || bin == "gradlew.bat" {
-		if resolved, err := filepath.Abs(filepath.Join(g.ProjectPath, bin)); err == nil {
-			absBin = resolved
-		}
-	}
-
-	// 3. Command setup
-	cmd := exec.CommandContext(ctx, absBin, args...)
-	cmd.Dir = g.ProjectPath
-
-	if len(g.Env) > 0 {
-		cmd.Env = g.Env
-	}
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-
-	return runners.TestResult{
-		Testname:  testName,
-		Passed:    err == nil,
-		Stdout:    string(out),
-		Timetaken: time.Since(start),
-	}, nil
 }

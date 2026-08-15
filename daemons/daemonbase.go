@@ -3,6 +3,8 @@ package daemons
 import (
 	"net"
 	"os/exec"
+
+	"github.com/Justi/projectseapig/runners"
 )
 
 type DaemonBase struct {
@@ -13,7 +15,7 @@ type DaemonBase struct {
 
 type Daemon interface {
 	StartDaemon() error
-	RunTests(testNames []string) ([]string, error)
+	RunTests(testNames []string) ([]runners.TestResult, error)
 	StopDaemon() error
 }
 

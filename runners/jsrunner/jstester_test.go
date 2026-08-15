@@ -59,23 +59,3 @@ func TestJSTesterListTests(t *testing.T) {
 		t.Errorf("Expected 2 tests in temp dir, got %d (All discovered: %v)", len(localTests), tests)
 	}
 }
-
-func TestJSTesterRunTest(t *testing.T) {
-	dir := t.TempDir()
-
-	jestConfig := fmt.Sprintf(`{"rootDir": "%s", "roots": ["%s"]}`,
-		filepath.ToSlash(dir),
-		filepath.ToSlash(dir),
-	)
-
-	tester := JStester{
-		BinPath:  "npx",
-		BaseArgs: []string{"jest", "--config", jestConfig, "--listTests"},
-		Timeout:  60 * time.Second,
-	}
-	result, _ := tester.RunTest("math.test.js")
-
-	if result.Testname != "math.test.js" {
-		t.Errorf("Expected test name math.test.js, got %s", result.Testname)
-	}
-}

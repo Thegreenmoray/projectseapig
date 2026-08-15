@@ -40,17 +40,3 @@ func TestPythonListTests_Integration(t *testing.T) {
 		t.Errorf("Expected test name to contain %q, got %q", expectedTestName, tests[0])
 	}
 }
-
-func TestPythonRunTest(t *testing.T) {
-	tester := Pythontester{
-		BinPath:  "pytest",
-		BaseArgs: []string{},
-		Timeout:  5 * time.Second,
-	}
-
-	result, _ := tester.RunTest("test_math.py::TestMath::test_add")
-
-	if result.Testname != "test_math.py::TestMath::test_add" {
-		t.Errorf("Expected test name, got %s", result.Testname)
-	}
-}

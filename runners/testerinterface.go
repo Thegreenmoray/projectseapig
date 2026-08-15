@@ -4,7 +4,6 @@ import "time"
 
 type TestRunner interface {
 	ListTests(projectPath string) ([]string, error)
-	RunTest(testName string) (TestResult, error)
 }
 
 type Pig struct {
