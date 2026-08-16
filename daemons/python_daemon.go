@@ -33,7 +33,7 @@ func (p *PythonDaemon) StartDaemon() error {
 	if err != nil {
 		return fmt.Errorf("Cannot establish pipe connection to Python")
 	}
-	if cmd.Start(); err != nil { //forgot to add this lol
+	if eee := cmd.Start(); eee != nil { //forgot to add this lol
 		return fmt.Errorf("Cannot startup Python")
 	}
 	//Maybe add a time out to prevent this from hanging later
@@ -67,7 +67,27 @@ func (p *PythonDaemon) StartDaemon() error {
 
 func (p *PythonDaemon) StopDaemon() error {
 	//kill the deamon when we're done with it
+	if p.daemonBase.Conn != nil {
+		return fmt.Errorf("Connection is invaild")
+	}
 
+	if eer := p.daemonBase.Conn.Close(); eer != nil {
+		return fmt.Errorf("Unable to close connection due to: %w", eer)
+	}
+	if p.daemonBase.Cmdkill != nil && p.daemonBase.Cmdkill.Process != nil {
+		return fmt.Errorf("Command is invaild")
+	}
+
+	if er := p.daemonBase.Cmdkill.Process.Kill(); er != nil {
+		return fmt.Errorf("Cannot kill command due to: %s", er)
+	}
+	_ = p.daemonBase.Cmdkill.Wait() //stops zombies
+
+	if p.Socketpath != "" {
+		_ = os.Remove(p.Socketpath)
+	}
+
+	return nil
 }
 
 // Not compelte yet, later change this when we finish start and stop daemon.
