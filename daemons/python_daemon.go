@@ -2,7 +2,7 @@ package daemons
 
 import (
 	"bufio"
-	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -28,7 +28,7 @@ func (p *PythonDaemon) StartDaemon() error {
 	cmd := exec.Command("python", p.DeamonPath, "--socket", p.Socketpath)
 
 	p.daemonBase.Cmdkill = cmd
-
+	//returns the output
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("Cannot establish pipe connection to Python")
@@ -45,7 +45,7 @@ func (p *PythonDaemon) StartDaemon() error {
 			break
 		}
 	}
-
+	//even if the python server sets up properly the os may not catch on to that the first time. this is here to catch those cases
 	for i := 0; i < 10; i++ {
 		conn, err := net.Dial("unix", p.Socketpath)
 		if err != nil && i != 9 {
@@ -56,6 +56,7 @@ func (p *PythonDaemon) StartDaemon() error {
 			}
 
 			p.daemonBase.Conn = conn
+			break //do we introduce a break here? we've got the connection at this point.
 		}
 	}
 
@@ -91,44 +92,15 @@ func (p *PythonDaemon) StopDaemon() error {
 }
 
 // Not compelte yet, later change this when we finish start and stop daemon.
-func (p *PythonDaemon) RunTests(testName []string) ([]runners.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), p.Timeout)
-	defer cancel()
-
-	bin := g.BinPath
-	if bin == "" {
-		bin = "pytest"
+func (p *PythonDaemon) RunTests(testNames []string) ([]runners.TestResult, error) {
+	wrapped := json.NewEncoder(p.daemonBase.Conn)     //since these tests are being sent by an array of strings we have to wrap it in json
+	if err := wrapped.Encode(testNames); err != nil { //converting to bytes and sending to server
+		return nil, fmt.Errorf("Unable to send tests due to: %w", err)
 	}
-
-	// High-performance Pytest CLI flags:
-	defaultArgs := []string{"-q", "--no-header", "--no-summary"}
-	args := append(defaultArgs, g.BaseArgs...)
-	args = append(args, testName)
-
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = g.ProjectPath // CRITICAL FIX: Directs execution to target project folder
-
-	// Environment Setup: Inject PYTHONDONTWRITEBYTECODE=1 to eliminate pycache disk writes
-	env := os.Environ()
-	env = append(env, "PYTHONDONTWRITEBYTECODE=1")
-	if len(g.Env) > 0 {
-		env = append(env, g.Env...)
+	var marinesnow []runners.TestResult //just a biology reference dont worry too much about it
+	decode := json.NewDecoder(p.daemonBase.Conn)
+	if err := decode.Decode(&marinesnow); err != nil { //decode will halt the thread (gorountie in this case), basic pbr/pbv stuff here.
+		return nil, fmt.Errorf("Unable to decode message due to: %w", err)
 	}
-	cmd.Env = env
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	passed := err == nil
-
-	if ctx.Err() == context.DeadlineExceeded {
-		passed = false
-		out = append(out, []byte("\n--- PROJECT SEAPIG: Python execution timed out! ---")...)
-	}
-
-	return runners.TestResult{
-		Testname:  testName,
-		Passed:    passed,
-		Stdout:    string(out),
-		Timetaken: time.Since(start),
-	}, nil
+	return marinesnow, nil
 }
