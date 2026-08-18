@@ -1,65 +1,66 @@
 package daemons
 
 import (
-	"context"
-	"os"
+	"bufio"
+	"fmt"
+	"net"
 	"os/exec"
-	"strings"
 	"time"
-
-	"github.com/Justi/projectseapig/runners"
 )
 
 type JsDaemon struct {
-	daemonBase  DaemonBase
+	DaemonBase
 	Socketpath  string        // Path to the Unix socket for communication with the JS daemon
 	Timeout     time.Duration //until a batch of tests are timed out
-	DeamonPath  string        //where the deamon is located
+	DaemonPath  string        //where the deamon is located
 	ProjectRoot string        //tests are located
 	NodePath    string
 	IsTS        bool
 }
 
-func (j *JsDaemon) RunTest(testName string) ([]runners.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), j.Timeout)
-	defer cancel()
+func (t *JsDaemon) StartDaemon() error {
+	//we will need to startup a socket for the deamon to listen on
+	args := []string{"tsx", t.DaemonPath, "--socket", t.Socketpath}
+	if t.IsTS {
+		args = append(args, "--ts")
+	}
+	cmd := exec.Command("npx", args...)
 
-	bin := j.BinPath
-	if bin == "" {
-		bin = "npm"
+	t.DaemonBase.Cmdkill = cmd
+	//returns the output
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("Cannot establish pipe connection to TS")
+	}
+	if eee := cmd.Start(); eee != nil { //forgot to add this lol
+		return fmt.Errorf("Cannot startup TS")
+	}
+	//Maybe add a time out to prevent this from hanging later
+	//but man, I really need to brush up on my io and cmd knowledge
+
+	scanner := bufio.NewScanner(stdoutPipe)
+	for scanner.Scan() { //is a while loop, still getting used to that.
+		if scanner.Text() == "READY" {
+			break
+		}
+	}
+	//even if the ts server sets up properly the os may not catch on to that the first time. this is here to catch those cases
+	for i := 0; i < 10; i++ {
+		conn, err := net.Dial("unix", t.Socketpath)
+		if err != nil && i != 9 {
+			time.Sleep(50 * time.Millisecond)
+		} else {
+			if err != nil {
+				return fmt.Errorf("Cannot dial Server: %w", err)
+			}
+
+			t.DaemonBase.Conn = conn
+			break //do we introduce a break here? we've got the connection at this point.
+		}
 	}
 
-	var args []string
-	if strings.Contains(bin, "npm") {
-		args = append([]string{"test", "--silent", "--"}, j.BaseArgs...)
-		args = append(args, "-t", testName, "--runInBand", "--no-coverage")
-	} else {
-		args = append(j.BaseArgs, "-t", testName, "--runInBand", "--no-coverage", "--silent")
-	}
+	//test
+	fmt.Println("Jest Daemon should be running")
 
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = j.ProjectPath // CRITICAL: Sets working dir to the project root
-
-	env := os.Environ()
-	env = append(env, "NODE_ENV=test")
-	if len(j.Env) > 0 {
-		env = append(env, j.Env...)
-	}
-	cmd.Env = env
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	passed := err == nil
-
-	if ctx.Err() == context.DeadlineExceeded {
-		passed = false
-		out = append(out, []byte("\n--- PROJECT SEAPIG: JavaScript execution timed out! ---")...)
-	}
-
-	return runners.TestResult{
-		Testname:  testName,
-		Passed:    passed,
-		Stdout:    string(out),
-		Timetaken: time.Since(start),
-	}, nil
+	return nil
 }

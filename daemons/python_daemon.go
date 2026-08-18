@@ -16,7 +16,7 @@ type PythonDaemon struct {
 	daemonBase  DaemonBase
 	Socketpath  string        // Path to the Unix socket for communication with the Python daemon
 	Timeout     time.Duration //until a batch of tests are timed out
-	DeamonPath  string        //where the deamon is located
+	DaemonPath  string        //where the deamon is located
 	ProjectRoot string
 }
 
@@ -25,7 +25,7 @@ type PythonDaemon struct {
 
 func (p *PythonDaemon) StartDaemon() error {
 	//we will need to startup a socket for the deamon to listen on
-	cmd := exec.Command("python", p.DeamonPath, "--socket", p.Socketpath)
+	cmd := exec.Command("python", p.DaemonPath, "--socket", p.Socketpath)
 
 	p.daemonBase.Cmdkill = cmd
 	//returns the output

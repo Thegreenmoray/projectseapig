@@ -1,73 +1,61 @@
 package daemons
 
 import (
-	"context"
+	"bufio"
+	"fmt"
+	"net"
 	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"time"
-
-	"github.com/Justi/projectseapig/runners"
 )
 
 type JavaDaemon struct {
-	daemonBase DaemonBase
+	DaemonBase
 	Socketpath string        // Path to the Unix socket for communication with the Java daemon
 	Timeout    time.Duration //until a batch of tests are timed out
-	DeamonPath string        //where the deamon is located
+	DaemonPath string        //where the deamon is located
 	TestPath   string        //where the test folder is located
 	IsKotlin   bool          // Flag to indicate if the project is a Kotlin project
 }
 
 func (j *JavaDaemon) StartDaemon() error {
+	//we will need to startup a socket for the deamon to listen on
+	cmd := exec.Command("python", j.DaemonPath, "--socket", j.Socketpath)
 
-}
+	j.Cmdkill = cmd
+	//returns the output
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("Cannot establish pipe connection to Python")
+	}
+	if eee := cmd.Start(); eee != nil { //forgot to add this lol
+		return fmt.Errorf("Cannot startup Python")
+	}
+	//Maybe add a time out to prevent this from hanging later
+	//but man, I really need to brush up on my io and cmd knowledge
 
-func (j *JavaDaemon) StopDaemon() error {
-
-}
-
-func (j *JavaDaemon) RunTests(testName []string) ([]runners.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
-	defer cancel()
-
-	bin := g.BinPath
-	var args []string
-
-	// 1. Build CLI args with performance flags (-q for quiet, -o for offline/no-remote-check)
-	if strings.Contains(bin, "mvn") {
-		args = append([]string{"test", "-q", "-o", "-B", "-Dtest=" + testName})
-	} else {
-		// Gradle execution
-		args = append([]string{"test", "-q", "--tests", testName})
-		if bin == "gradlew" {
-			if runtime.GOOS == "windows" {
-				bin = ".\\gradlew.bat"
-			} else {
-				bin = "./gradlew"
+	scanner := bufio.NewScanner(stdoutPipe)
+	for scanner.Scan() { //is a while loop, still getting used to that.
+		if scanner.Text() == "READY" {
+			break
+		}
+	}
+	//even if the java server sets up properly the os may not catch on to that the first time. this is here to catch those cases
+	for i := 0; i < 10; i++ {
+		conn, err := net.Dial("unix", j.Socketpath)
+		if err != nil && i != 9 {
+			time.Sleep(50 * time.Millisecond)
+		} else {
+			if err != nil {
+				return fmt.Errorf("Cannot dial Server: %w", err)
 			}
+
+			p.daemonBase.Conn = conn
+			break //do we introduce a break here? we've got the connection at this point.
 		}
 	}
 
-	// 2. Resolve relative path for wrapper scripts
-	absBin := bin
-	if strings.HasPrefix(bin, ".") || bin == "gradlew.bat" {
-		if resolved, err := filepath.Abs(filepath.Join(g.ProjectPath, bin)); err == nil {
-			absBin = resolved
-		}
-	}
+	//test
+	fmt.Println("Pytest Daemon should be running")
 
-	// 3. Command setup
-	cmd := exec.CommandContext(ctx, absBin, args...)
-	cmd.Dir = g.ProjectPath
-
-	if len(g.Env) > 0 {
-		cmd.Env = g.Env
-	}
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	d := []runners.TestResult{}
-	return d, nil
+	return nil
 }
