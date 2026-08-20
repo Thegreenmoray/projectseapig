@@ -40,42 +40,71 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
 	}
 
-	// Target the standard Java test source directory
-	testRoot := filepath.Join(projectPath, "src", "test", "java")
-	searchPath := projectPath
-	if _, err := os.Stat(testRoot); err == nil {
-		searchPath = testRoot
+	// 1. Identify valid test source roots (Java and/or Kotlin)
+	var searchPaths []string
+	javaRoot := filepath.Join(projectPath, "src", "test", "java")
+	kotlinRoot := filepath.Join(projectPath, "src", "test", "kotlin")
+
+	if _, err := os.Stat(javaRoot); err == nil {
+		searchPaths = append(searchPaths, javaRoot)
+	}
+	if _, err := os.Stat(kotlinRoot); err == nil {
+		searchPaths = append(searchPaths, kotlinRoot)
 	}
 
-	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
+	// Fallback to scanning the whole project path if standard paths aren't found
+	if len(searchPaths) == 0 {
+		searchPaths = append(searchPaths, projectPath)
+	}
 
-		// Check if the timeout context was canceled during a long walk
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("java test discovery timed out after %v while scanning file tree", g.Timeout)
-		default:
-		}
-
-		if !info.IsDir() && strings.HasSuffix(info.Name(), "Test.java") {
-			relPath, err := filepath.Rel(searchPath, path)
+	// 2. Walk through all identified search paths
+	for _, searchPath := range searchPaths {
+		err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 
-			cleanPath := strings.TrimSuffix(relPath, ".java")
-			fqcn := strings.ReplaceAll(cleanPath, string(os.PathSeparator), ".")
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("test discovery timed out after %v while scanning file tree", g.Timeout)
+			default:
+			}
 
-			tests = append(tests, fqcn)
+			if !info.IsDir() {
+				var ext string
+				name := info.Name()
+
+				// Match Java or Kotlin test naming conventions
+				if strings.HasSuffix(name, "Test.java") || strings.HasSuffix(name, "Tests.java") {
+					ext = ".java"
+				} else if strings.HasSuffix(name, "Test.kt") || strings.HasSuffix(name, "Tests.kt") {
+					ext = ".kt"
+				}
+
+				if ext != "" {
+					relPath, err := filepath.Rel(searchPath, path)
+					if err != nil {
+						return err
+					}
+
+					// Strip the specific extension (.java or .kt) and convert separators to dots
+					cleanPath := strings.TrimSuffix(relPath, ext)
+					fqcn := strings.ReplaceAll(cleanPath, string(os.PathSeparator), ".")
+
+					tests = append(tests, fqcn)
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
-
-	if ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("java test discovery timed out after %v while scanning file tree", g.Timeout)
 	}
 
-	return tests, err
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("test discovery timed out after %v while scanning file tree", g.Timeout)
+	}
+
+	return tests, nil
 }

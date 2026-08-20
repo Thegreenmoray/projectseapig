@@ -53,7 +53,7 @@ def main():
             
             print("READY") #dont bother waiting for the loop to finish
             sys.stdout.flush()
-            conn,addie=server.accept()
+            conn,_=server.accept()
             with conn:
              
              while True:

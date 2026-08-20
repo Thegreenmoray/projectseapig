@@ -1,1 +1,5 @@
 node_modules
+.gradle
+build.gradle
+package.json
+package-lock.json

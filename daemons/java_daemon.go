@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -17,45 +18,66 @@ type JavaDaemon struct {
 	IsKotlin   bool          // Flag to indicate if the project is a Kotlin project
 }
 
-func (j *JavaDaemon) StartDaemon() error {
-	//we will need to startup a socket for the deamon to listen on
-	cmd := exec.Command("python", j.DaemonPath, "--socket", j.Socketpath)
+func (j *JavaDaemon) StartDaemon() error { // 1. Determine compiled class directory based on IsKotlin
+	classDir := "build/classes/java/test"
+	if j.IsKotlin {
+		classDir = "build/classes/kotlin/test"
+	}
 
+	// Optional: Pass the test class path and language mode to the daemon as args
+	args := []string{
+		"-jar", j.DaemonPath,
+		"--socket", j.Socketpath,
+		"--test-classes", classDir,
+	}
+
+	if j.IsKotlin {
+		args = append(args, "--mode", "kotlin")
+	}
+
+	//^this is just to ensure kotlin compatability
+
+	cmd := exec.Command("java", args...)
 	j.Cmdkill = cmd
-	//returns the output
+
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("Cannot establish pipe connection to Python")
+		return fmt.Errorf("cannot establish stdout pipe to Java daemon: %w", err)
 	}
-	if eee := cmd.Start(); eee != nil { //forgot to add this lol
-		return fmt.Errorf("Cannot startup Python")
-	}
-	//Maybe add a time out to prevent this from hanging later
-	//but man, I really need to brush up on my io and cmd knowledge
 
+	// Pipe stderr to standard OS stderr for easy crash debugging
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("cannot startup Java daemon: %w", err)
+	}
+
+	// Wait for READY handshake from Java
 	scanner := bufio.NewScanner(stdoutPipe)
-	for scanner.Scan() { //is a while loop, still getting used to that.
+	for scanner.Scan() {
 		if scanner.Text() == "READY" {
 			break
 		}
 	}
-	//even if the java server sets up properly the os may not catch on to that the first time. this is here to catch those cases
-	for i := 0; i < 10; i++ {
-		conn, err := net.Dial("unix", j.Socketpath)
-		if err != nil && i != 9 {
-			time.Sleep(50 * time.Millisecond)
-		} else {
-			if err != nil {
-				return fmt.Errorf("Cannot dial Server: %w", err)
-			}
-
-			p.daemonBase.Conn = conn
-			break //do we introduce a break here? we've got the connection at this point.
-		}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading Java daemon stdout: %w", err)
 	}
 
-	//test
-	fmt.Println("Pytest Daemon should be running")
+	// Retry dial loop for OS socket propagation
+	for i := 0; i < 10; i++ {
+		conn, err := net.Dial("unix", j.Socketpath)
+		if err == nil {
+			j.Conn = conn
+			break // Connection acquired! Stop looping.
+		}
 
+		if i == 9 {
+			return fmt.Errorf("cannot dial Java daemon server after retries: %w", err)
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	fmt.Println("JUnit Daemon running successfully!")
 	return nil
 }

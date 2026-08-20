@@ -27,6 +27,34 @@ var l string
 var deep bool
 var testLock sync.Mutex
 
+// IntHeap is a min-heap of ints.
+type IntHeap []int
+
+// 1. Len is part of sort.Interface.
+func (h IntHeap) Len() int { return len(h) }
+
+// 2. Less is part of sort.Interface. Determines min vs max heap.
+func (h IntHeap) Less(i, j int) bool { return h[i] < h[j] }
+
+// 3. Swap is part of sort.Interface.
+func (h IntHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+
+// 4. Push adds an element to the underlying slice.
+// Pointer receiver is required because it modifies the slice's length.
+func (h *IntHeap) Push(x any) {
+	*h = append(*h, x.(int))
+}
+
+// 5. Pop removes the last element from the underlying slice.
+// Pointer receiver is required because it modifies the slice's length.
+func (h *IntHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
 // pigCmd represents the pig command
 var pigCmd = &cobra.Command{
 	Use:   "pig",
@@ -66,6 +94,13 @@ var pigCmd = &cobra.Command{
 		//though in general we probably want to break this into several functions in order to make it more readable
 		//and maintainable, but for now this is fine.
 
+		heap := &IntHeap{}
+
+		for _, test := range tests {
+			heap.Push(test) //will repsent longest time of a test (maps from prevoius tests will be mapped here)
+		}
+		//fine for a skeleton but we will need more fleshed out options later.
+
 		totalExpectedResults := len(tests) * n
 		c := make(chan runners.TestResult, totalExpectedResults)
 
@@ -94,6 +129,7 @@ var pigCmd = &cobra.Command{
 		// The worker function is defined ONCE here.
 		//ants is a more efficent goroutine, old way would spawn too many goroutines
 		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
+
 		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0)*2, func(payload interface{}) {
 
 			//this is functional equvient to a lambda expression

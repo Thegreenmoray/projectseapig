@@ -15,6 +15,9 @@ import (
 	"github.com/Justi/projectseapig/runners"
 )
 
+var Interpered HashSet[string] = *NewHashSet[string]()
+var Compiled HashSet[string] = *NewHashSet[string]()
+
 func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 	timeout, err := time.ParseDuration(Cfg.Timeout)
 	if err != nil || timeout <= 0 {
