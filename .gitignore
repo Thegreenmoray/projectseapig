@@ -3,3 +3,5 @@ node_modules
 build.gradle
 package.json
 package-lock.json
+.vscode/
+.env

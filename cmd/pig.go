@@ -27,27 +27,27 @@ var l string
 var deep bool
 var testLock sync.Mutex
 
-// IntHeap is a min-heap of ints.
-type IntHeap []int
+// FloatHeap is a min-heap of float32.
+type FloatHeap []float32
 
 // 1. Len is part of sort.Interface.
-func (h IntHeap) Len() int { return len(h) }
+func (h FloatHeap) Len() float32 { return len(h) }
 
 // 2. Less is part of sort.Interface. Determines min vs max heap.
-func (h IntHeap) Less(i, j int) bool { return h[i] < h[j] }
+func (h FloatHeap) Less(i, j float32) bool { return h[i] < h[j] }
 
 // 3. Swap is part of sort.Interface.
-func (h IntHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h FloatHeap) Swap(i, j float32) { h[i], h[j] = h[j], h[i] }
 
 // 4. Push adds an element to the underlying slice.
 // Pointer receiver is required because it modifies the slice's length.
-func (h *IntHeap) Push(x any) {
-	*h = append(*h, x.(int))
+func (h *FloatHeap) Push(x any) {
+	*h = append(*h, x.(float32))
 }
 
 // 5. Pop removes the last element from the underlying slice.
 // Pointer receiver is required because it modifies the slice's length.
-func (h *IntHeap) Pop() any {
+func (h *FloatHeap) Pop() any {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -94,7 +94,7 @@ var pigCmd = &cobra.Command{
 		//though in general we probably want to break this into several functions in order to make it more readable
 		//and maintainable, but for now this is fine.
 
-		heap := &IntHeap{}
+		heap := &FloatHeap{}
 
 		for _, test := range tests {
 			heap.Push(test) //will repsent longest time of a test (maps from prevoius tests will be mapped here)

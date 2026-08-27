@@ -92,6 +92,7 @@ func testcollection(pig runners.TestRunner, jobs chan<- string, wg *sync.WaitGro
 	}
 }
 
+// boot up the deamon/compiled lang were looking for here
 func worker(pig runners.TestRunner, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
 	defer wg.Done() //output channel
 	//no need to be explict about output
