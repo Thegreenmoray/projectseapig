@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/factory"
 	"github.com/Justi/projectseapig/logs"
 	"github.com/Justi/projectseapig/runners"
@@ -31,13 +32,13 @@ var testLock sync.Mutex
 type FloatHeap []float32
 
 // 1. Len is part of sort.Interface.
-func (h FloatHeap) Len() float32 { return len(h) }
+func (h FloatHeap) Len() int { return len(h) }
 
 // 2. Less is part of sort.Interface. Determines min vs max heap.
-func (h FloatHeap) Less(i, j float32) bool { return h[i] < h[j] }
+func (h FloatHeap) Less(i, j int) bool { return h[i] < h[j] }
 
 // 3. Swap is part of sort.Interface.
-func (h FloatHeap) Swap(i, j float32) { h[i], h[j] = h[j], h[i] }
+func (h FloatHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 
 // 4. Push adds an element to the underlying slice.
 // Pointer receiver is required because it modifies the slice's length.
@@ -143,7 +144,7 @@ var pigCmd = &cobra.Command{
 			//by pausing for a moment each process.
 			testLock.Lock()
 
-			result, err := args.tester.RunTest(args.testName)
+			result, err := args.tester.RunTests(args.testName)
 
 			testLock.Unlock()
 
@@ -217,7 +218,7 @@ var pigCmd = &cobra.Command{
 // go implictly casts a struct as an interface if an interface is requested
 type taskArgs struct {
 	testName string
-	tester   runners.TestRunner
+	tester   daemons.DaemonBase
 	ch       chan<- runners.TestResult
 	wg       *sync.WaitGroup
 }

@@ -11,7 +11,6 @@ import (
 
 type JavaDaemon struct {
 	DaemonBase
-	Socketpath string        // Path to the Unix socket for communication with the Java daemon
 	Timeout    time.Duration //until a batch of tests are timed out
 	DaemonPath string        //where the deamon is located
 	TestPath   string        //where the test folder is located

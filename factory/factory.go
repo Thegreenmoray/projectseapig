@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/Justi/projectseapig/compiled"
+	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/runners/gorunner"
 	"github.com/Justi/projectseapig/runners/javarunner"
 	"github.com/Justi/projectseapig/runners/jsrunner"
@@ -17,6 +20,58 @@ import (
 
 var Interpered HashSet[string] = *NewHashSet[string]()
 var Compiled HashSet[string] = *NewHashSet[string]()
+
+// just go for now, will be updated later
+func Compilertype(lang string, projectPath string) *compiled.GoCompiler {
+	binName := "seapig_test_runner"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+
+	return &compiled.GoCompiler{
+		ProjectPath:  projectPath,
+		CompiledPath: filepath.Join(projectPath, "bin", binName),
+	}
+}
+
+func Daemontype(lang string, projectPath string) daemons.Daemon {
+	switch strings.ToLower(lang) {
+	case "java":
+		return &daemons.JavaDaemon{
+			TestPath:   filepath.Join(projectPath, "src", "test", "java"),
+			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
+			IsKotlin:   false,
+		}
+	case "kotlin":
+		return &daemons.JavaDaemon{
+			TestPath:   filepath.Join(projectPath, "src", "test", "kotlin"),
+			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
+			IsKotlin:   true,
+		}
+
+	case "js":
+		return &daemons.JsDaemon{
+			NodePath:   projectPath,
+			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
+			IsTS:       false,
+		}
+	case "ts":
+		return &daemons.JsDaemon{
+			NodePath:   projectPath,
+			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
+			IsTS:       true,
+		}
+
+	case "python":
+		return &daemons.PythonDaemon{
+			ProjectRoot: projectPath,
+			DaemonPath:  filepath.Join("..", "projectseapig", "servers"),
+		}
+
+	default:
+		return nil
+	}
+}
 
 func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 	timeout, err := time.ParseDuration(Cfg.Timeout)

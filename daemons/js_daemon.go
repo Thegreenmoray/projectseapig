@@ -10,7 +10,6 @@ import (
 
 type JsDaemon struct {
 	DaemonBase
-	Socketpath  string        // Path to the Unix socket for communication with the JS daemon
 	Timeout     time.Duration //until a batch of tests are timed out
 	DaemonPath  string        //where the deamon is located
 	ProjectRoot string        //tests are located
