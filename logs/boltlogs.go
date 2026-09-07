@@ -84,12 +84,12 @@ func (r *BoltRepo) SavePigtime(testName string, pig *runners.Pig) error {
 }
 
 func (r *BoltRepo) extractpigtime() ([]int, error) {
-	var results []int
+	var results []int //Actually may want to convert this to a hashmap
 
 	err := r.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("TestHistory"))
+		b := tx.Bucket([]byte("TestTime"))
 		if b == nil {
-			return fmt.Errorf("TestHistory does not exist")
+			return fmt.Errorf("TestTime does not exist")
 		}
 
 		c := b.Cursor()

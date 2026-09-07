@@ -28,14 +28,19 @@ var l string
 var deep bool
 var testLock sync.Mutex
 
+type Pair struct {
+	Time     int32
+	Testname string
+}
+
 // FloatHeap is a min-heap of float32.
-type FloatHeap []float32
+type FloatHeap []Pair
 
 // 1. Len is part of sort.Interface.
 func (h FloatHeap) Len() int { return len(h) }
 
 // 2. Less is part of sort.Interface. Determines min vs max heap.
-func (h FloatHeap) Less(i, j int) bool { return h[i] < h[j] }
+func (h FloatHeap) Less(i, j int) bool { return h[i].Time < h[j].Time }
 
 // 3. Swap is part of sort.Interface.
 func (h FloatHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
@@ -43,12 +48,12 @@ func (h FloatHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 // 4. Push adds an element to the underlying slice.
 // Pointer receiver is required because it modifies the slice's length.
 func (h *FloatHeap) Push(x any) {
-	*h = append(*h, x.(float32))
+	*h = append(*h, x.(Pair))
 }
 
 // 5. Pop removes the last element from the underlying slice.
 // Pointer receiver is required because it modifies the slice's length.
-func (h *FloatHeap) Pop() any {
+func (h *FloatHeap) Pop() Pair {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -71,7 +76,7 @@ var pigCmd = &cobra.Command{
 		if !cancontinue {
 			return
 		} //if user does not say yes or y, stop immedatly
-
+		daemon, err := factory.Daemontype(l, ".")
 		log.Info().Msg(factory.Yellow + "sending the herd! this may take a while....." + factory.Reset)
 
 		if deep {
@@ -97,13 +102,27 @@ var pigCmd = &cobra.Command{
 
 		heap := &FloatHeap{}
 
-		for _, test := range tests {
-			heap.Push(test) //will repsent longest time of a test (maps from prevoius tests will be mapped here)
-		}
 		//fine for a skeleton but we will need more fleshed out options later.
 
 		totalExpectedResults := len(tests) * n
-		c := make(chan runners.TestResult, totalExpectedResults)
+		c := make(chan []runners.TestResult, totalExpectedResults)
+
+		for _, testName := range tests {
+			for i := 0; i < n; i++ {
+				//activate bboltcache and store the results
+				samplebbolttime := 0
+				heap.Push(Pair{Time: int32(samplebbolttime), Testname: testName}) //will repsent longest time of a test (maps from prevoius tests will be mapped here)
+			}
+		}
+		cpucores := runtime.GOMAXPROCS(0) * 2
+		spilt := totalExpectedResults / cpucores
+		sliceofslices := make([][]string, spilt) //that are cpucores in length
+
+		for j := 0; j < spilt; j++ {
+			for i := 0; i < cpucores; i++ {
+				sliceofslices[j] = append(sliceofslices[j], heap.Pop().Testname)
+			}
+		}
 
 		bar := progressbar.NewOptions(totalExpectedResults,
 			progressbar.OptionEnableColorCodes(true),
@@ -130,7 +149,7 @@ var pigCmd = &cobra.Command{
 		// The worker function is defined ONCE here.
 		//ants is a more efficent goroutine, old way would spawn too many goroutines
 		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
-
+		daemon.StartDaemon()
 		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0)*2, func(payload interface{}) {
 
 			//this is functional equvient to a lambda expression
@@ -140,24 +159,13 @@ var pigCmd = &cobra.Command{
 			//defer just waits until we finish everything, even if it panics. prevents deadlocks.
 			defer args.wg.Done()
 
-			//allows process to build without risking early timeout, also prevents database deadlocks, file collisions, or shared port conflicts
-			//by pausing for a moment each process.
-			testLock.Lock()
-
-			result, err := args.tester.RunTests(args.testName)
-
-			testLock.Unlock()
+			results, err := daemon.RunTests()
 
 			//	log.Info().Msgf("%s", args.testName)
-			if result.Testname == "" {
-				result.Testname = args.testName // Guarantee it's never a blank string
-			}
+
 			//stores our error if we have one
-			if err != nil {
-				result.Stderr = err.Error()
-			}
+
 			//adds it to channel
-			args.ch <- result
 
 			// -------------------------------------------------------------
 			// 👉 INCREMENT PROGRESS BAR HERE
@@ -168,6 +176,7 @@ var pigCmd = &cobra.Command{
 		})
 
 		// 3. The dispatcher loop is now incredibly lightweight
+		//replace with a slice of arrays of tests when ready.
 		for _, testName := range tests {
 			for i := 0; i < n; i++ {
 				wg.Add(1)
@@ -175,7 +184,7 @@ var pigCmd = &cobra.Command{
 				// Pass only the data payload. No new function allocation on the heap!
 				_ = pool.Invoke(taskArgs{
 					testName: testName,
-					tester:   tester,
+					tester:   tester, //replace with daemon
 					ch:       c,
 					wg:       &wg,
 				})
@@ -187,21 +196,13 @@ var pigCmd = &cobra.Command{
 			wg.Wait()
 			close(c)
 			pool.Release()
+			daemon.StopDaemon()
 		}()
 
 		errorOutputs := make(map[string]string)
 		testing := make(map[string][]runners.TestResult)
 
 		for f := range c {
-
-			// If this specific run failed and we don't have an error captured for this test yet
-			if !f.Passed && errorOutputs[f.Testname] == "" {
-				if len(f.Stdout) != 0 {
-					errorOutputs[f.Testname] = f.Stdout
-				} else if len(f.Stderr) != 0 {
-					errorOutputs[f.Testname] = f.Stderr
-				}
-			}
 
 			testing[f.Testname] = append(testing[f.Testname], f)
 		}
@@ -217,10 +218,10 @@ var pigCmd = &cobra.Command{
 
 // go implictly casts a struct as an interface if an interface is requested
 type taskArgs struct {
-	testName string
-	tester   daemons.DaemonBase
-	ch       chan<- runners.TestResult
-	wg       *sync.WaitGroup
+	testNames []string
+	tester    daemons.DaemonBase
+	ch        chan<- []runners.TestResult
+	wg        *sync.WaitGroup
 }
 
 func results1(errorOutputs map[string]string, repo *logs.BoltRepo, testing map[string][]runners.TestResult) {

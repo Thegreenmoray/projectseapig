@@ -97,7 +97,6 @@ that SeaPig is configured correctly.`,
 	},
 }
 
-// exellenct, next we will add one for compilers and then we can begin
 func testcollection(pig runners.TestRunner, jobs chan<- string, wg *sync.WaitGroup) {
 	defer wg.Done() //input channel
 	names, err := pig.ListTests(".")
