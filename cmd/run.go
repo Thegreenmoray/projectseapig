@@ -6,7 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/factory"
+	"github.com/Justi/projectseapig/logs"
 	"github.com/Justi/projectseapig/runners"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -22,8 +24,14 @@ a less costly run, just to be certain that it isn't just tests failing and ensur
 that SeaPig is configured correctly.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		pig, err := factory.Testtype(lang, ".") // Assuming factory function matches your previous setup
+		//for now just assume its a daemon, we'll sort out go when ready
+		daemon, errr := factory.Daemontype(lang, ".")
 		if err != nil {
 			fmt.Println(err)
+			return
+		}
+		if errr != nil {
+			fmt.Println(errr)
 			return
 		}
 
@@ -41,7 +49,7 @@ that SeaPig is configured correctly.`,
 
 		// 2. Start the worker to process jobs
 		workerWg.Add(1)
-		go worker(pig, jobs, results, &workerWg)
+		go worker(daemon, jobs, results, &workerWg)
 
 		// 3. Monitor collection: Close jobs channel when collection is done
 		go func() {
@@ -56,7 +64,7 @@ that SeaPig is configured correctly.`,
 		}()
 
 		anyFailed := false
-
+		repo, _ := logs.NewBoltRepo("seapig.db")
 		// 5. Drain the results channel safely
 		for result := range results {
 			log.Info().Msgf("--- Test Name: %s ---", result.Testname)
@@ -66,7 +74,15 @@ that SeaPig is configured correctly.`,
 
 			if !result.Passed {
 				anyFailed = true
+				//if it fails we get a skewed runtime, this cannot be allowed.
+				continue
 			}
+			batchResult := runners.Pig{
+				Testname:    result.Testname,
+				Dateandtime: time.Now().Format(time.RFC3339),
+			}
+			repo.SavePigtime(result.Testname, &batchResult)
+
 		}
 
 		// 6. Evaluate final status after ALL tests have run
@@ -76,10 +92,12 @@ that SeaPig is configured correctly.`,
 		}
 
 		log.Info().Msg("Overall Summary: PASS")
+
 		os.Exit(0)
 	},
 }
 
+// exellenct, next we will add one for compilers and then we can begin
 func testcollection(pig runners.TestRunner, jobs chan<- string, wg *sync.WaitGroup) {
 	defer wg.Done() //input channel
 	names, err := pig.ListTests(".")
@@ -93,18 +111,21 @@ func testcollection(pig runners.TestRunner, jobs chan<- string, wg *sync.WaitGro
 }
 
 // boot up the deamon/compiled lang were looking for here
-func worker(pig runners.TestRunner, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
+func worker(pig daemons.Daemon, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
 	defer wg.Done() //output channel
 	//no need to be explict about output
+	names := []string{}
 	for testName := range jobs {
-		start := time.Now()
-		result, err := pig.RunTest(testName)
-		result.Timetaken = time.Since(start)
-		if err != nil {
-			log.Error().Err(err).Str("test", testName).Msg("Error executing test runner system")
-			continue
-		}
+		names = append(names, testName)
+	}
+	pig.StartDaemon()
+	resultss, err := pig.RunTests(names)
+	pig.StopDaemon()
 
+	if err != nil {
+		log.Error().Err(err).Msg("Error executing test runner system")
+	}
+	for _, result := range resultss {
 		results <- result
 	}
 }

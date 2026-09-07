@@ -16,6 +16,10 @@ type MockPigRunner struct {
 	ShouldFailExecution bool
 }
 
+type Mockdeamon struct {
+	ShouldFailExecution bool
+}
+
 func (m *MockPigRunner) ListTests(projectPath string) ([]string, error) {
 	// Return a single predictable test target name
 	return []string{"mock_test_case"}, nil

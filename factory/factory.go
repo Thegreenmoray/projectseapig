@@ -22,7 +22,7 @@ var Interpered HashSet[string] = *NewHashSet[string]()
 var Compiled HashSet[string] = *NewHashSet[string]()
 
 // just go for now, will be updated later
-func Compilertype(lang string, projectPath string) *compiled.GoCompiler {
+func Compilertype(lang string, projectPath string) (*compiled.GoCompiler, error) {
 	binName := "seapig_test_runner"
 	if runtime.GOOS == "windows" {
 		binName += ".exe"
@@ -31,45 +31,45 @@ func Compilertype(lang string, projectPath string) *compiled.GoCompiler {
 	return &compiled.GoCompiler{
 		ProjectPath:  projectPath,
 		CompiledPath: filepath.Join(projectPath, "bin", binName),
-	}
+	}, nil
 }
 
-func Daemontype(lang string, projectPath string) daemons.Daemon {
+func Daemontype(lang string, projectPath string) (daemons.Daemon, error) {
 	switch strings.ToLower(lang) {
 	case "java":
 		return &daemons.JavaDaemon{
 			TestPath:   filepath.Join(projectPath, "src", "test", "java"),
 			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
 			IsKotlin:   false,
-		}
+		}, nil
 	case "kotlin":
 		return &daemons.JavaDaemon{
 			TestPath:   filepath.Join(projectPath, "src", "test", "kotlin"),
 			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
 			IsKotlin:   true,
-		}
+		}, nil
 
 	case "js":
 		return &daemons.JsDaemon{
 			NodePath:   projectPath,
 			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
 			IsTS:       false,
-		}
+		}, errors.ErrUnsupported
 	case "ts":
 		return &daemons.JsDaemon{
 			NodePath:   projectPath,
 			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
 			IsTS:       true,
-		}
+		}, nil
 
 	case "python":
 		return &daemons.PythonDaemon{
 			ProjectRoot: projectPath,
 			DaemonPath:  filepath.Join("..", "projectseapig", "servers"),
-		}
+		}, nil
 
 	default:
-		return nil
+		return nil, errors.ErrUnsupported
 	}
 }
 
