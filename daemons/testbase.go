@@ -27,7 +27,7 @@ func (p *DaemonBase) Stop() error {
 
 	// 1. Close connection if present
 	if p.Conn != nil {
-		if err := p.Conn.Close(); err != nil && firstErr == nil {
+		if err := p.Conn.Close(); err != nil {
 			firstErr = fmt.Errorf("unable to close socket connection: %w", err)
 		}
 	}
