@@ -106,21 +106,23 @@ var pigCmd = &cobra.Command{
 
 		totalExpectedResults := len(tests) * n
 		c := make(chan []runners.TestResult, totalExpectedResults)
-
+		b, _ := logs.NewBoltRepo("TestTime")
+		hashmap, _ := b.Extractpigtime()
 		for _, testName := range tests {
 			for i := 0; i < n; i++ {
 				//activate bboltcache and store the results
-				samplebbolttime := 0
-				heap.Push(Pair{Time: int32(samplebbolttime), Testname: testName}) //will repsent longest time of a test (maps from prevoius tests will be mapped here)
+				samplebbolttime := hashmap[testName]
+				heap.Push(Pair{Time: -int32(samplebbolttime), Testname: testName}) //will repsent longest time of a test (maps from prevoius tests will be mapped here)
 			}
 		}
 		cpucores := runtime.GOMAXPROCS(0) * 2
-		spilt := totalExpectedResults / cpucores
-		sliceofslices := make([][]string, spilt) //that are cpucores in length
-
-		for j := 0; j < spilt; j++ {
-			for i := 0; i < cpucores; i++ {
-				sliceofslices[j] = append(sliceofslices[j], heap.Pop().Testname)
+		spilt := (totalExpectedResults / cpucores) + 1
+		sliceofslices := make([][]string, spilt) //that are max) cpucores in length
+		for heap.Len() > 0 {
+			for j := 0; j < spilt; j++ {
+				for i := 0; i < cpucores; i++ {
+					sliceofslices[j] = append(sliceofslices[j], heap.Pop().Testname)
+				}
 			}
 		}
 
@@ -149,7 +151,7 @@ var pigCmd = &cobra.Command{
 		// The worker function is defined ONCE here.
 		//ants is a more efficent goroutine, old way would spawn too many goroutines
 		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
-		daemon.StartDaemon()
+		daemon.Start()
 		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0)*2, func(payload interface{}) {
 
 			//this is functional equvient to a lambda expression
@@ -159,7 +161,11 @@ var pigCmd = &cobra.Command{
 			//defer just waits until we finish everything, even if it panics. prevents deadlocks.
 			defer args.wg.Done()
 
-			results, err := daemon.RunTests()
+			results, err := daemon.RunTests(args.testNames)
+			if err != nil {
+
+			}
+			c <- results
 
 			//	log.Info().Msgf("%s", args.testName)
 
@@ -171,24 +177,22 @@ var pigCmd = &cobra.Command{
 			// 👉 INCREMENT PROGRESS BAR HERE
 			// schollz/progressbar is thread-safe, so workers can call it directly
 			// -------------------------------------------------------------
-			_ = bar.Add(1)
+			_ = bar.Add(len(args.testNames))
 
 		})
 
 		// 3. The dispatcher loop is now incredibly lightweight
 		//replace with a slice of arrays of tests when ready.
-		for _, testName := range tests {
-			for i := 0; i < n; i++ {
-				wg.Add(1)
+		for _, testnames := range sliceofslices {
+			wg.Add(1)
 
-				// Pass only the data payload. No new function allocation on the heap!
-				_ = pool.Invoke(taskArgs{
-					testName: testName,
-					tester:   tester, //replace with daemon
-					ch:       c,
-					wg:       &wg,
-				})
-			}
+			// Pass only the data payload. No new function allocation on the heap!
+			_ = pool.Invoke(taskArgs{
+				testNames: testnames,
+				tester:    daemon, //replace with daemon
+				ch:        c,
+				wg:        &wg,
+			})
 		}
 
 		// 4. Teardown remains beautifully non-blocking
@@ -196,15 +200,15 @@ var pigCmd = &cobra.Command{
 			wg.Wait()
 			close(c)
 			pool.Release()
-			daemon.StopDaemon()
+			daemon.Stop()
 		}()
 
 		errorOutputs := make(map[string]string)
 		testing := make(map[string][]runners.TestResult)
-
-		for f := range c {
-
-			testing[f.Testname] = append(testing[f.Testname], f)
+		for testBatch := range c {
+			for _, result := range testBatch {
+				testing[result.Testname] = append(testing[result.Testname], result)
+			}
 		}
 		repo, _ := logs.NewBoltRepo("seapig.db")
 		defer repo.Close()
@@ -219,7 +223,7 @@ var pigCmd = &cobra.Command{
 // go implictly casts a struct as an interface if an interface is requested
 type taskArgs struct {
 	testNames []string
-	tester    daemons.DaemonBase
+	tester    daemons.TestExecutor
 	ch        chan<- []runners.TestResult
 	wg        *sync.WaitGroup
 }

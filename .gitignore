@@ -5,3 +5,7 @@ package.json
 package-lock.json
 .vscode/
 .env
+fake.db
+coverage
+coverage.out
+c.out

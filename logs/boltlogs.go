@@ -3,7 +3,6 @@ package logs
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/Justi/projectseapig/runners"
@@ -83,8 +82,8 @@ func (r *BoltRepo) SavePigtime(testName string, pig *runners.Pig) error {
 	})
 }
 
-func (r *BoltRepo) extractpigtime() ([]int, error) {
-	var results []int //Actually may want to convert this to a hashmap
+func (r *BoltRepo) Extractpigtime() (map[string]int, error) {
+	results := make(map[string]int)
 
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte("TestTime"))
@@ -94,13 +93,12 @@ func (r *BoltRepo) extractpigtime() ([]int, error) {
 
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			// Convert byte slice 'v' to int (assuming stringified int was stored)
-			val, err := strconv.Atoi(string(v))
-			if err != nil {
+			var durationNs int64
+			if err := json.Unmarshal(v, &durationNs); err != nil {
 				return fmt.Errorf("failed to parse test time for key %s: %w", string(k), err)
 			}
 
-			results = append(results, val)
+			results[string(k)] = int(durationNs)
 		}
 
 		return nil

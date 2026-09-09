@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Justi/projectseapig/compiled"
 	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/runners/gorunner"
 	"github.com/Justi/projectseapig/runners/javarunner"
@@ -18,23 +17,9 @@ import (
 	"github.com/Justi/projectseapig/runners"
 )
 
-var Interpered HashSet[string] = *NewHashSet[string]()
-var Compiled HashSet[string] = *NewHashSet[string]()
-
 // just go for now, will be updated later
-func Compilertype(lang string, projectPath string) (*compiled.GoCompiler, error) {
-	binName := "seapig_test_runner"
-	if runtime.GOOS == "windows" {
-		binName += ".exe"
-	}
 
-	return &compiled.GoCompiler{
-		ProjectPath:  projectPath,
-		CompiledPath: filepath.Join(projectPath, "bin", binName),
-	}, nil
-}
-
-func Daemontype(lang string, projectPath string) (daemons.Daemon, error) {
+func Daemontype(lang string, projectPath string) (daemons.TestExecutor, error) {
 	switch strings.ToLower(lang) {
 	case "java":
 		return &daemons.JavaDaemon{
@@ -54,7 +39,7 @@ func Daemontype(lang string, projectPath string) (daemons.Daemon, error) {
 			NodePath:   projectPath,
 			DaemonPath: filepath.Join("..", "projectseapig", "servers"),
 			IsTS:       false,
-		}, errors.ErrUnsupported
+		}, nil
 	case "ts":
 		return &daemons.JsDaemon{
 			NodePath:   projectPath,
@@ -66,6 +51,16 @@ func Daemontype(lang string, projectPath string) (daemons.Daemon, error) {
 		return &daemons.PythonDaemon{
 			ProjectRoot: projectPath,
 			DaemonPath:  filepath.Join("..", "projectseapig", "servers"),
+		}, nil
+	case "go":
+		binName := "seapig_test_runner"
+		if runtime.GOOS == "windows" {
+			binName += ".exe"
+		}
+
+		return &daemons.GoCompiler{
+			ProjectPath:  projectPath,
+			CompiledPath: filepath.Join(projectPath, "bin", binName),
 		}, nil
 
 	default:

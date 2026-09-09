@@ -3,27 +3,40 @@ package daemons
 import (
 	"bufio"
 	"fmt"
-	"net"
-	"os"
-	"os/exec"
 	"time"
 )
 
 type JavaDaemon struct {
 	DaemonBase
-	Timeout    time.Duration //until a batch of tests are timed out
-	DaemonPath string        //where the deamon is located
-	TestPath   string        //where the test folder is located
-	IsKotlin   bool          // Flag to indicate if the project is a Kotlin project
+	Timeout    time.Duration
+	DaemonPath string
+	TestPath   string
+	IsKotlin   bool
+
+	Executor CommandExecutor
+	Dialer   SocketDialer
 }
 
-func (j *JavaDaemon) StartDaemon() error { // 1. Determine compiled class directory based on IsKotlin
+func (j *JavaDaemon) getExecutor() CommandExecutor {
+	if j.Executor == nil {
+		return &RealCommandExecutor{}
+	}
+	return j.Executor
+}
+
+func (j *JavaDaemon) getDialer() SocketDialer {
+	if j.Dialer == nil {
+		return &RealSocketDialer{}
+	}
+	return j.Dialer
+}
+
+func (j *JavaDaemon) Start() error {
 	classDir := "build/classes/java/test"
 	if j.IsKotlin {
 		classDir = "build/classes/kotlin/test"
 	}
 
-	// Optional: Pass the test class path and language mode to the daemon as args
 	args := []string{
 		"-jar", j.DaemonPath,
 		"--socket", j.Socketpath,
@@ -34,47 +47,40 @@ func (j *JavaDaemon) StartDaemon() error { // 1. Determine compiled class direct
 		args = append(args, "--mode", "kotlin")
 	}
 
-	//^this is just to ensure kotlin compatability
-
-	cmd := exec.Command("java", args...)
-	j.Cmdkill = cmd
-
-	stdoutPipe, err := cmd.StdoutPipe()
+	proc, stdoutPipe, err := j.getExecutor().StartCommand("java", args...)
 	if err != nil {
-		return fmt.Errorf("cannot establish stdout pipe to Java daemon: %w", err)
-	}
-
-	// Pipe stderr to standard OS stderr for easy crash debugging
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("cannot startup Java daemon: %w", err)
 	}
 
-	// Wait for READY handshake from Java
+	// Read READY handshake
 	scanner := bufio.NewScanner(stdoutPipe)
+	readyReceived := false
 	for scanner.Scan() {
 		if scanner.Text() == "READY" {
+			readyReceived = true
 			break
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading Java daemon stdout: %w", err)
 	}
+	if !readyReceived {
+		return fmt.Errorf("java daemon exited before sending READY")
+	}
 
-	// Retry dial loop for OS socket propagation
+	// Dial socket
+	dialer := j.getDialer()
 	for i := 0; i < 10; i++ {
-		conn, err := net.Dial("unix", j.Socketpath)
+		conn, err := dialer.Dial("unix", j.Socketpath)
 		if err == nil {
 			j.Conn = conn
-			break // Connection acquired! Stop looping.
+			break
 		}
-
 		if i == 9 {
+			_ = proc.Kill()
 			return fmt.Errorf("cannot dial Java daemon server after retries: %w", err)
 		}
-
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	fmt.Println("JUnit Daemon running successfully!")

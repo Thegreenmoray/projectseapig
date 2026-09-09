@@ -110,16 +110,17 @@ func testcollection(pig runners.TestRunner, jobs chan<- string, wg *sync.WaitGro
 }
 
 // boot up the deamon/compiled lang were looking for here
-func worker(pig daemons.Daemon, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
+func worker(pig daemons.TestExecutor, jobs <-chan string, results chan<- runners.TestResult, wg *sync.WaitGroup) {
 	defer wg.Done() //output channel
 	//no need to be explict about output
 	names := []string{}
+	pig.Start()
+	defer pig.Stop()
 	for testName := range jobs {
 		names = append(names, testName)
 	}
-	pig.StartDaemon()
+
 	resultss, err := pig.RunTests(names)
-	pig.StopDaemon()
 
 	if err != nil {
 		log.Error().Err(err).Msg("Error executing test runner system")
