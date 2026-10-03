@@ -6,6 +6,8 @@ import (
 
 	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/runners"
+	"github.com/Justi/projectseapig/runners/javarunner"
+	"github.com/Justi/projectseapig/runners/jsrunner"
 )
 
 func TestDaemon(t *testing.T) {
@@ -120,6 +122,57 @@ func TestFactory(t *testing.T) {
 		fmt.Printf("failed as expected")
 	}
 
+}
+
+func TestKotlinAndTypeScriptDispatch(t *testing.T) {
+	tests := []struct {
+		language string
+		check    func(daemons.TestExecutor) bool
+		runner   func(runners.TestRunner) bool
+	}{
+		{
+			language: "kotlin",
+			check: func(executor daemons.TestExecutor) bool {
+				daemon, ok := executor.(*daemons.JavaDaemon)
+				return ok && daemon.IsKotlin && daemon.Socketpath != ""
+			},
+			runner: func(testRunner runners.TestRunner) bool {
+				_, ok := testRunner.(*javarunner.Javatester)
+				return ok
+			},
+		},
+		{
+			language: "ts",
+			check: func(executor daemons.TestExecutor) bool {
+				daemon, ok := executor.(*daemons.JsDaemon)
+				return ok && daemon.IsTS && daemon.Socketpath != ""
+			},
+			runner: func(testRunner runners.TestRunner) bool {
+				_, ok := testRunner.(*jsrunner.JStester)
+				return ok
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.language, func(t *testing.T) {
+			executor, err := Daemontype(test.language, ".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !test.check(executor) {
+				t.Fatalf("unexpected daemon for %s: %#v", test.language, executor)
+			}
+
+			testRunner, err := Testtype(test.language, ".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !test.runner(testRunner) {
+				t.Fatalf("unexpected test runner for %s: %#v", test.language, testRunner)
+			}
+		})
+	}
 }
 
 func TestColors(t *testing.T) {

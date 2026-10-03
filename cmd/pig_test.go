@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"container/heap"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,7 +28,7 @@ func (m *MockPigRunner) RunTes(t string) (runners.TestResult, error) {
 
 // --- TEST 1: Worker Pipeline Success ---
 func TestSwap(t *testing.T) {
-	heap := &FloatHeap{}
+	heap := &IntHeap{}
 	heap.Push(Pair{Time: -int32(90), Testname: "ddd"})
 	heap.Push(Pair{Time: -int32(50), Testname: "ddd"})
 	heap.Swap(1, 0)
@@ -51,19 +52,21 @@ func TestRunCmd_Success(t *testing.T) {
 		}
 
 		// 3. Setup Heap & Dispatcher
-		heap := &FloatHeap{}
+		h := &IntHeap{}
+		heap.Init(h)
 		n := 1 // run count per test
 		for _, testName := range tests {
 			sampleTime := hashmap[testName]
-			heap.Push(Pair{Time: -int32(sampleTime), Testname: testName})
+			heap.Push(h, Pair{Time: -int32(sampleTime), Testname: testName})
 		}
 
 		cpucores := 2
 		var sliceofslices [][]string
-		for heap.Len() > 0 {
+		for h.Len() > 0 {
 			var batch []string
-			for i := 0; i < cpucores && heap.Len() > 0; i++ {
-				batch = append(batch, heap.Pop().Testname)
+			for i := 0; i < cpucores && h.Len() > 0; i++ {
+				pair := heap.Pop(h).(Pair)
+				batch = append(batch, pair.Testname)
 			}
 			sliceofslices = append(sliceofslices, batch)
 		}

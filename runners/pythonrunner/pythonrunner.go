@@ -32,10 +32,6 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 		bin = "pytest"
 	}
 
-	// --collect-only finds all tests. -q (quiet) strips unnecessary headers.
-	args := append(g.BaseArgs, "--collect-only", "-q")
-
-	cmd := exec.CommandContext(ctx, bin, args...)
 	projectPath = filepath.Clean(projectPath)
 	info, err := os.Stat(projectPath)
 	if err != nil {
@@ -47,6 +43,26 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
 	}
+
+	args := append([]string(nil), g.BaseArgs...)
+	if bin == "pytest" {
+		for _, candidate := range []string{
+			filepath.Join(projectPath, ".venv", "Scripts", "python.exe"),
+			filepath.Join(projectPath, "venv", "Scripts", "python.exe"),
+			filepath.Join(projectPath, ".venv", "bin", "python"),
+			filepath.Join(projectPath, "venv", "bin", "python"),
+		} {
+			if candidateInfo, statErr := os.Stat(candidate); statErr == nil && !candidateInfo.IsDir() {
+				bin = candidate
+				args = append([]string{"-m", "pytest"}, args...)
+				break
+			}
+		}
+	}
+
+	// --collect-only finds all tests. -q (quiet) strips unnecessary headers.
+	args = append(args, "--collect-only", "-q")
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = projectPath
 	if len(g.Env) > 0 {
 		cmd.Env = g.Env

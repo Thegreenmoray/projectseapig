@@ -3,6 +3,7 @@ package gorunner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -89,6 +90,9 @@ func TestSampleTwo(t *testing.T) {}
 			got, err := tt.tester.ListTests(tt.path)
 			if (err != nil) != tt.expectErr {
 				t.Fatalf("ListTests() error = %v, expectErr %v", err, tt.expectErr)
+			}
+			if tt.name == "Error when no tests found in package" && !strings.Contains(err.Error(), "check that --lang matches this project") {
+				t.Errorf("expected actionable language hint, got %v", err)
 			}
 			if !tt.expectErr && len(got) < tt.minExpected {
 				t.Errorf("Expected at least %d tests, got %d", tt.minExpected, len(got))

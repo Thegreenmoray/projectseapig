@@ -21,6 +21,19 @@ type MockExecutor struct {
 	BinaryName   string
 }
 
+type RecordingSocketDialer struct {
+	Network string
+	Address string
+}
+
+func (d *RecordingSocketDialer) Dial(network, address string) (net.Conn, error) {
+	d.Network = network
+	d.Address = address
+	client, peer := net.Pipe()
+	go peer.Close()
+	return client, nil
+}
+
 func (m *MockExecutor) StartCommand(name string, args ...string) (ProcessRunner, io.ReadCloser, error) {
 	m.BinaryName = name
 	return &MockProcess{}, m.StdoutReader, nil
@@ -48,7 +61,7 @@ func TestAllDaemons_FullLifecycle(t *testing.T) {
 		},
 		{
 			name:        "JsDaemon",
-			expectedBin: "npx",
+			expectedBin: "node",
 			createDaemon: func(sp string, exec CommandExecutor) TestExecutor {
 				d := &JsDaemon{
 					DaemonPath: "runner.ts",
@@ -141,6 +154,55 @@ func TestAllDaemons_FullLifecycle(t *testing.T) {
 			// 5. Test Stop()
 			if err := daemon.Stop(); err != nil {
 				t.Fatalf("Stop() failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestDaemonsAcceptTCPReadyHandshake(t *testing.T) {
+	tests := []struct {
+		name  string
+		start func(CommandExecutor, SocketDialer) TestExecutor
+	}{
+		{
+			name: "JavaScript",
+			start: func(executor CommandExecutor, dialer SocketDialer) TestExecutor {
+				return &JsDaemon{
+					DaemonBase: DaemonBase{Socketpath: "unused.sock"},
+					DaemonPath: "server.ts",
+					Executor:   executor,
+					Dialer:     dialer,
+				}
+			},
+		},
+		{
+			name: "Python",
+			start: func(executor CommandExecutor, dialer SocketDialer) TestExecutor {
+				return &PythonDaemon{
+					DaemonBase: DaemonBase{Socketpath: "unused.sock"},
+					DaemonPath: "server.py",
+					Executor:   executor,
+					Dialer:     dialer,
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reader, writer := io.Pipe()
+			go func() {
+				_, _ = writer.Write([]byte("READY TCP 127.0.0.1:43210\n"))
+				_ = writer.Close()
+			}()
+			dialer := &RecordingSocketDialer{}
+			daemon := test.start(&MockExecutor{StdoutReader: reader}, dialer)
+			if err := daemon.Start(); err != nil {
+				t.Fatalf("Start() failed: %v", err)
+			}
+			defer daemon.Stop()
+			if dialer.Network != "tcp" || dialer.Address != "127.0.0.1:43210" {
+				t.Fatalf("unexpected dial target: %s %s", dialer.Network, dialer.Address)
 			}
 		})
 	}

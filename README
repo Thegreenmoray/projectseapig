@@ -28,11 +28,20 @@ Sea Pig executes your unit test suite concurrently across multiple loop iteratio
 ### 🔧 Supported in v1.0
 * 🟦 **Go** (`go`)
 * 🐍 **Python** (`pytest`)
-* ☕ **Java** (`JUnit` / Maven / Gradle)
-* 🟡 **JavaScript** (`npm test`)
+* ☕ **Java and Kotlin** (Maven / Gradle)
+* 🟡 **JavaScript and TypeScript** (Jest)
 
 ### 🚀 Planned Future Languages
-Kotlin • TypeScript • Ruby • PHP • Elixir • C# / .NET • Swift • Dart / Flutter • Rust • C / C++
+Ruby • PHP • Elixir • C# / .NET • Swift • Dart / Flutter • Rust • C / C++
+
+The Java/Kotlin daemon JAR must be built from the Sea Pig checkout before use:
+
+```bash
+gradle -p servers jar
+npm ci --prefix servers
+```
+
+The daemons send test selectors over local sockets; source files remain in the target project. Windows uses loopback TCP for Python and JavaScript/TypeScript daemons. Java and Kotlin projects need a Maven or Gradle build, Python projects need pytest in the project environment or on `PATH`, and JavaScript/TypeScript projects need Jest configured.
 
 ---
 

@@ -1,0 +1,43 @@
+plugins {
+    // Apply the Java plugin to add support for Java
+    id 'java'
+    // Apply the Application plugin to make the project executable
+    id 'application'
+}
+
+group = 'com.example'
+version = '1.0-SNAPSHOT'
+java.sourceCompatibility = JavaVersion.VERSION_17
+
+repositories {
+    // Use Maven Central for resolving dependencies
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'com.google.code.gson:gson:2.11.0'
+}
+
+application {
+    mainClass = 'servers.Server'
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['.']
+            include 'Server.java'
+        }
+    }
+}
+
+tasks.named('jar') {
+    archiveBaseName = 'seapig-server'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes('Main-Class': application.mainClass.get())
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}

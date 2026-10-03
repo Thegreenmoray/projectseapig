@@ -77,7 +77,7 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	}
 
 	if len(tests) == 0 {
-		return nil, fmt.Errorf("no test functions starting with 'Test' found in %s", projectPath)
+		return nil, fmt.Errorf("no Go tests found in %s; Go tests must be func Test... declarations in *_test.go files, so check that --lang matches this project", projectPath)
 	}
 
 	return tests, nil

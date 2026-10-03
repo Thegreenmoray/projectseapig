@@ -114,8 +114,19 @@ func worker(pig daemons.TestExecutor, jobs <-chan string, results chan<- runners
 	defer wg.Done() //output channel
 	//no need to be explict about output
 	names := []string{}
-	pig.Start()
-	defer pig.Stop()
+	if err := pig.Start(); err != nil {
+		results <- runners.TestResult{
+			Testname: "<daemon>",
+			Passed:   false,
+			Stderr:   err.Error(),
+		}
+		return
+	}
+	defer func() {
+		if err := pig.Stop(); err != nil {
+			log.Error().Err(err).Msg("Failed to stop test daemon")
+		}
+	}()
 	for testName := range jobs {
 		names = append(names, testName)
 	}

@@ -1,6 +1,7 @@
 node_modules
 .gradle
 build.gradle
+!servers/build.gradle
 package.json
 package-lock.json
 .vscode/
@@ -9,3 +10,5 @@ fake.db
 coverage
 coverage.out
 c.out
+__pycache__
+.pytest_cache

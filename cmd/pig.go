@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"container/heap"
+
 	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/factory"
 	"github.com/Justi/projectseapig/logs"
@@ -26,7 +28,6 @@ import (
 var n int
 var l string
 var deep bool
-var testLock sync.Mutex
 
 type Pair struct {
 	Time     int32
@@ -34,26 +35,26 @@ type Pair struct {
 }
 
 // FloatHeap is a min-heap of float32.
-type FloatHeap []Pair
+type IntHeap []Pair
 
 // 1. Len is part of sort.Interface.
-func (h FloatHeap) Len() int { return len(h) }
+func (h IntHeap) Len() int { return len(h) }
 
 // 2. Less is part of sort.Interface. Determines min vs max heap.
-func (h FloatHeap) Less(i, j int) bool { return h[i].Time < h[j].Time }
+func (h IntHeap) Less(i, j int) bool { return h[i].Time > h[j].Time }
 
 // 3. Swap is part of sort.Interface.
-func (h FloatHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h IntHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 
 // 4. Push adds an element to the underlying slice.
 // Pointer receiver is required because it modifies the slice's length.
-func (h *FloatHeap) Push(x any) {
+func (h *IntHeap) Push(x any) {
 	*h = append(*h, x.(Pair))
 }
 
 // 5. Pop removes the last element from the underlying slice.
 // Pointer receiver is required because it modifies the slice's length.
-func (h *FloatHeap) Pop() Pair {
+func (h *IntHeap) Pop() any {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -70,60 +71,71 @@ var pigCmd = &cobra.Command{
 	 to back out if you are not ready`,
 	Run: func(cmd *cobra.Command, args []string) {
 		loopFlag, _ := cmd.Flags().GetInt("loop")
-		n = loopFlag //self explaintory just how many times you want to loop.
+		n = loopFlag
 
 		cancontinue, tester := verification()
 		if !cancontinue {
 			return
-		} //if user does not say yes or y, stop immedatly
+		}
+
 		daemon, err := factory.Daemontype(l, ".")
+		if err != nil {
+			log.Error().Err(err).Msg("failed to initialize daemon")
+			return
+		}
+
 		log.Info().Msg(factory.Yellow + "sending the herd! this may take a while....." + factory.Reset)
 
 		if deep {
 			n = 100
 		}
-		//finds all tests if any.
+
 		tests, err := tester.ListTests(".")
-		if err != nil {
-			log.Error().Err(err).Msg("failed to list tests")
+		if err != nil || len(tests) == 0 {
+			log.Error().Err(err).Msg("failed to list tests or no tests found")
 			return
 		}
 
-		if len(tests) == 0 {
-			log.Info().Msg("no tests found")
-		}
-		//will be editable in config file or some other means
 		if n == 10 && factory.Cfg.Workers > 0 {
 			n = factory.Cfg.Workers
 		}
-		//do greedy scheduling right around here, wether as a function or here, this will do it
-		//though in general we probably want to break this into several functions in order to make it more readable
-		//and maintainable, but for now this is fine.
 
-		heap := &FloatHeap{}
-
-		//fine for a skeleton but we will need more fleshed out options later.
+		h := &IntHeap{}
+		heap.Init(h)
 
 		totalExpectedResults := len(tests) * n
-		c := make(chan []runners.TestResult, totalExpectedResults)
 		b, _ := logs.NewBoltRepo("TestTime")
 		hashmap, _ := b.Extractpigtime()
+		c := make(chan []runners.TestResult, totalExpectedResults)
+
 		for _, testName := range tests {
+			samplebbolttime := hashmap[testName]
+			if samplebbolttime == 0 {
+				samplebbolttime = hashmap[fmt.Sprintf("%s_0", testName)]
+			}
+
 			for i := 0; i < n; i++ {
-				//activate bboltcache and store the results
-				samplebbolttime := hashmap[testName]
-				heap.Push(Pair{Time: -int32(samplebbolttime), Testname: testName}) //will repsent longest time of a test (maps from prevoius tests will be mapped here)
+				heap.Push(h, Pair{Time: int32(samplebbolttime), Testname: testName})
 			}
 		}
+
 		cpucores := runtime.GOMAXPROCS(0) * 2
-		spilt := (totalExpectedResults / cpucores) + 1
-		sliceofslices := make([][]string, spilt) //that are max) cpucores in length
-		for heap.Len() > 0 {
-			for j := 0; j < spilt; j++ {
-				for i := 0; i < cpucores; i++ {
-					sliceofslices[j] = append(sliceofslices[j], heap.Pop().Testname)
-				}
+
+		// Bug 1 Fix: Build dynamic slices without empty trailing slots
+		var sliceofslices [][]string
+		currentChunk := make([]string, 0, cpucores)
+
+		for h.Len() > 0 {
+			pair := heap.Pop(h).(Pair)
+			currentChunk = append(currentChunk, pair.Testname)
+
+			if len(currentChunk) == cpucores {
+				sliceofslices = append(sliceofslices, currentChunk)
+				currentChunk = make([]string, 0, cpucores)
 			}
+		}
+		if len(currentChunk) > 0 {
+			sliceofslices = append(sliceofslices, currentChunk)
 		}
 
 		bar := progressbar.NewOptions(totalExpectedResults,
@@ -147,76 +159,58 @@ var pigCmd = &cobra.Command{
 
 		var wg sync.WaitGroup
 
-		// 2. Instantiate a fixed PoolWithFunc.
-		// The worker function is defined ONCE here.
-		//ants is a more efficent goroutine, old way would spawn too many goroutines
-		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
-		daemon.Start()
-		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0)*2, func(payload interface{}) {
-
-			//this is functional equvient to a lambda expression
-			//recive the the data from the method below
+		if err := daemon.Start(); err != nil {
+			log.Error().Err(err).Msg("failed to start test daemon")
+			return
+		}
+		pool, _ := ants.NewPoolWithFunc(cpucores, func(payload interface{}) {
 			args := payload.(taskArgs)
-
-			//defer just waits until we finish everything, even if it panics. prevents deadlocks.
 			defer args.wg.Done()
 
 			results, err := daemon.RunTests(args.testNames)
 			if err != nil {
-
+				log.Error().Err(err).Msgf("Daemon execution failed for batch: %v", args.testNames)
+				return
 			}
-			c <- results
 
-			//	log.Info().Msgf("%s", args.testName)
-
-			//stores our error if we have one
-
-			//adds it to channel
-
-			// -------------------------------------------------------------
-			// 👉 INCREMENT PROGRESS BAR HERE
-			// schollz/progressbar is thread-safe, so workers can call it directly
-			// -------------------------------------------------------------
+			if len(results) > 0 {
+				c <- results
+			}
 			_ = bar.Add(len(args.testNames))
-
 		})
 
-		// 3. The dispatcher loop is now incredibly lightweight
-		//replace with a slice of arrays of tests when ready.
 		for _, testnames := range sliceofslices {
 			wg.Add(1)
-
-			// Pass only the data payload. No new function allocation on the heap!
 			_ = pool.Invoke(taskArgs{
 				testNames: testnames,
-				tester:    daemon, //replace with daemon
+				tester:    daemon,
 				ch:        c,
 				wg:        &wg,
 			})
 		}
 
-		// 4. Teardown remains beautifully non-blocking
-		go func() {
-			wg.Wait()
-			close(c)
-			pool.Release()
-			daemon.Stop()
-		}()
+		// Bug 2 Fix: Synchronous teardown ensures all results land in channel c before reading
+		wg.Wait()
+		close(c)
+		pool.Release()
+		if err := daemon.Stop(); err != nil {
+			log.Error().Err(err).Msg("failed to stop test daemon")
+		}
 
 		errorOutputs := make(map[string]string)
 		testing := make(map[string][]runners.TestResult)
+
 		for testBatch := range c {
 			for _, result := range testBatch {
 				testing[result.Testname] = append(testing[result.Testname], result)
 			}
 		}
+
 		repo, _ := logs.NewBoltRepo("seapig.db")
 		defer repo.Close()
 
 		results1(errorOutputs, repo, testing)
-
-	},
-}
+	}}
 
 //a little messy up here, may want to break this up
 

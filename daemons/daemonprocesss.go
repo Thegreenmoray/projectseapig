@@ -1,6 +1,7 @@
 package daemons
 
 import (
+	"bufio"
 	"io"
 	"net"
 	"os"
@@ -17,6 +18,11 @@ type ProcessRunner interface {
 }
 
 type RealCommandExecutor struct{}
+
+func drainProcessOutput(scanner *bufio.Scanner) {
+	for scanner.Scan() {
+	}
+}
 
 type realProcess struct {
 	cmd *exec.Cmd
