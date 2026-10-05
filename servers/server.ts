@@ -146,7 +146,7 @@ function main(): void {
                                 stderr: error?.message || String(error)
                             }];
                         }
-                        if (!socket.destroyed) socket.write(JSON.stringify(results) + '\n');
+                        //if (!socket.destroyed) socket.write(JSON.stringify(results) + '\n');
                     });
                 }
             }

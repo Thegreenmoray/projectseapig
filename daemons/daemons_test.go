@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Justi/projectseapig/runners"
 )
@@ -205,6 +209,131 @@ func TestDaemonsAcceptTCPReadyHandshake(t *testing.T) {
 				t.Fatalf("unexpected dial target: %s %s", dialer.Network, dialer.Address)
 			}
 		})
+	}
+}
+
+func TestJavaServerBuildUsesMavenWrapper(t *testing.T) {
+	projectRoot := t.TempDir()
+	serverDir := t.TempDir()
+	mavenWrapper := "mvnw"
+	if runtime.GOOS == "windows" {
+		mavenWrapper += ".cmd"
+	}
+	for _, path := range []string{
+		filepath.Join(projectRoot, "pom.xml"),
+		filepath.Join(projectRoot, mavenWrapper),
+		filepath.Join(serverDir, "pom.xml"),
+	} {
+		if err := os.WriteFile(path, []byte(""), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	command, args, err := javaServerBuildCommand(projectRoot, serverDir)
+	if err != nil {
+		t.Fatalf("javaServerBuildCommand() failed: %v", err)
+	}
+
+	wrapperPath := filepath.Join(projectRoot, mavenWrapper)
+	wantArgs := []string{"-f", filepath.Join(serverDir, "pom.xml"), "package"}
+	if runtime.GOOS == "windows" {
+		wantArgs = append([]string{"/c", wrapperPath}, wantArgs...)
+		if command != "cmd.exe" {
+			t.Fatalf("command = %q, want cmd.exe", command)
+		}
+	} else if command != wrapperPath {
+		t.Fatalf("command = %q, want %q", command, wrapperPath)
+	}
+	for index, want := range wantArgs {
+		if index >= len(args) || args[index] != want {
+			t.Fatalf("args = %#v, want prefix %#v", args, wantArgs)
+		}
+	}
+}
+
+func TestJavaServerJarRebuildsWhenSourceChanges(t *testing.T) {
+	serverDir := t.TempDir()
+	jarPath := filepath.Join(serverDir, "build", "libs", "server.jar")
+	if err := os.MkdirAll(filepath.Dir(jarPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	jarTime := time.Now().Add(-time.Minute)
+	if err := os.WriteFile(jarPath, []byte("jar"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(jarPath, jarTime, jarTime); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(serverDir, "Server.java")
+	if err := os.WriteFile(sourcePath, []byte("class Server {}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if needsBuild, err := javaServerJarNeedsBuild(jarPath, serverDir); err != nil || !needsBuild {
+		t.Fatalf("newer source should require a rebuild: needsBuild=%t err=%v", needsBuild, err)
+	}
+
+	sourceTime := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(sourcePath, sourceTime, sourceTime); err != nil {
+		t.Fatal(err)
+	}
+	if needsBuild, err := javaServerJarNeedsBuild(jarPath, serverDir); err != nil || needsBuild {
+		t.Fatalf("older source should reuse the JAR: needsBuild=%t err=%v", needsBuild, err)
+	}
+}
+
+func TestJavaDaemonBuildsAndStartsWithJDKOnly(t *testing.T) {
+	for _, tool := range []string{"java", "javac", "jar"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s is unavailable", tool)
+		}
+	}
+
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate Java server source")
+	}
+	repoRoot := filepath.Dir(filepath.Dir(testFile))
+	serverDir := filepath.Join(t.TempDir(), "servers")
+	if err := os.MkdirAll(serverDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(repoRoot, "servers", "Server.java"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serverDir, "Server.java"), source, 0600); err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := filepath.Join(t.TempDir(), "maven-project")
+	if err := os.MkdirAll(projectRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	jarPath := filepath.Join(serverDir, "build", "libs", "seapig-server-1.0-SNAPSHOT.jar")
+	daemon := &JavaDaemon{
+		DaemonBase:  DaemonBase{Socketpath: filepath.Join(t.TempDir(), "java-daemon.sock")},
+		DaemonPath:  jarPath,
+		ProjectRoot: projectRoot,
+	}
+	if err := daemon.ensureServerJar(); err != nil {
+		t.Fatalf("automatic JDK-only daemon build failed: %v", err)
+	}
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("Java daemon failed to start: %v", err)
+	}
+	defer daemon.Stop()
+	results, err := daemon.RunTests([]string{})
+	if err != nil {
+		t.Fatalf("Java daemon socket request failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("empty request returned unexpected results: %+v", results)
+	}
+	failures, err := daemon.RunTests([]string{"MissingBuildTest"})
+	if err != nil {
+		t.Fatalf("Java daemon failure response could not be decoded: %v", err)
+	}
+	if len(failures) != 1 || failures[0].Passed || !strings.Contains(failures[0].Stderr, projectRoot) {
+		t.Fatalf("unexpected escaped failure response: %+v", failures)
 	}
 }
 

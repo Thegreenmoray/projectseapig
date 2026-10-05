@@ -1,7 +1,4 @@
-package servers;
 
-import com.google.gson.Gson;
-import com.google.gson.annotations.SerializedName;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -17,18 +14,19 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
 class TestResult {
-    @SerializedName("test_name")
-    private final String testName;
-    @SerializedName("passed")
-    private final boolean passed;
-    @SerializedName("time_taken")
-    private final long timeTaken;
-    @SerializedName("stdout")
-    private final String stdout;
-    @SerializedName("stderr")
-    private final String stderr;
+    final String testName;
+    final boolean passed;
+    final long timeTaken;
+    final String stdout;
+    final String stderr;
 
     TestResult(String testName, boolean passed, long timeTaken, String stdout, String stderr) {
         this.testName = testName;
@@ -37,12 +35,18 @@ class TestResult {
         this.stdout = stdout;
         this.stderr = stderr;
     }
+
+    String toJson() {
+        return "{\"test_name\":" + Server.quoteJsonString(testName)
+            + ",\"passed\":" + passed
+            + ",\"time_taken\":" + timeTaken
+            + ",\"stdout\":" + Server.quoteJsonString(stdout)
+            + ",\"stderr\":" + Server.quoteJsonString(stderr) + "}";
+    }
 }
 
 public class Server {
-    private static final Gson GSON = new Gson();
-
-    private static TestResult runTest(String testName, Path projectRoot) {
+    private static List<TestResult> runTest(String testName, Path projectRoot) {
         List<String> command = new ArrayList<>();
         Path gradleBuild = projectRoot.resolve("build.gradle");
         Path gradleKotlinBuild = projectRoot.resolve("build.gradle.kts");
@@ -58,12 +62,17 @@ public class Server {
                 }
                 command.add(wrapper.toString());
             } else {
+                if (isWindows) {
+                    command.add("cmd.exe");
+                    command.add("/c");
+                }
                 command.add("gradle");
             }
             command.add("test");
             command.add("--tests");
             command.add(testName);
             command.add("--console=plain");
+            command.add("--rerun-tasks");
         } else if (Files.exists(mavenBuild)) {
             Path wrapper = projectRoot.resolve(isWindows ? "mvnw.cmd" : "mvnw");
             if (Files.exists(wrapper)) {
@@ -73,13 +82,17 @@ public class Server {
                 }
                 command.add(wrapper.toString());
             } else {
+                if (isWindows) {
+                    command.add("cmd.exe");
+                    command.add("/c");
+                }
                 command.add("mvn");
             }
             command.add("-Dtest=" + testName);
             command.add("-Dstyle.color=never");
             command.add("test");
         } else {
-            return new TestResult(testName, false, 0, "", "No Gradle or Maven build file found in " + projectRoot);
+            return List.of(new TestResult(testName, false, 0, "", "No Gradle or Maven build file found in " + projectRoot));
         }
 
         long start = System.nanoTime();
@@ -91,21 +104,113 @@ public class Server {
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             int exitCode = process.waitFor();
             long duration = System.nanoTime() - start;
-            return new TestResult(testName, exitCode == 0, duration, output, exitCode == 0 ? "" : output);
+            List<TestResult> junitResults = readJUnitResults(projectRoot, testName);
+            if (!junitResults.isEmpty()) {
+                return junitResults;
+            }
+            return List.of(new TestResult(testName, exitCode == 0, duration, output, exitCode == 0 ? "" : output));
         } catch (IOException error) {
-            return new TestResult(testName, false, System.nanoTime() - start, "", error.toString());
+            return List.of(new TestResult(testName, false, System.nanoTime() - start, "", error.toString()));
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
-            return new TestResult(testName, false, System.nanoTime() - start, "", "Test execution interrupted");
+            return List.of(new TestResult(testName, false, System.nanoTime() - start, "", "Test execution interrupted"));
         }
     }
 
     private static List<TestResult> runTests(String[] testNames, Path projectRoot) {
         List<TestResult> results = new ArrayList<>();
         for (String testName : testNames) {
-            results.add(runTest(testName, projectRoot));
+            results.addAll(runTest(testName, projectRoot));
         }
         return results;
+    }
+
+    private static List<TestResult> readJUnitResults(Path projectRoot, String testName) throws IOException {
+        List<TestResult> results = new ArrayList<>();
+        Path[] reportDirectories = {
+            projectRoot.resolve("build/test-results/test"),
+            projectRoot.resolve("target/surefire-reports")
+        };
+
+        for (Path reportDirectory : reportDirectories) {
+            if (!Files.isDirectory(reportDirectory)) {
+                continue;
+            }
+
+            try (var reportFiles = Files.list(reportDirectory)) {
+                for (Path reportFile : reportFiles.toList()) {
+                    String filename = reportFile.getFileName().toString();
+                    if (!filename.startsWith("TEST-") || !filename.endsWith(".xml")
+                            || !matchesTestClass(filename.substring(5, filename.length() - 4), testName)) {
+                        continue;
+                    }
+                    results.addAll(parseJUnitReport(reportFile, testName));
+                }
+            }
+        }
+        return results;
+    }
+
+    private static boolean matchesTestClass(String reportClass, String testName) {
+        return reportClass.equals(testName)
+            || (!testName.contains(".") && reportClass.endsWith("." + testName));
+    }
+
+    private static List<TestResult> parseJUnitReport(Path reportFile, String testName) throws IOException {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+
+            var document = factory.newDocumentBuilder().parse(reportFile.toFile());
+            NodeList testCases = document.getElementsByTagName("testcase");
+            List<TestResult> results = new ArrayList<>(testCases.getLength());
+            for (int i = 0; i < testCases.getLength(); i++) {
+                Element testCase = (Element) testCases.item(i);
+                String className = testCase.getAttribute("classname");
+                if (!className.isEmpty() && !matchesTestClass(className, testName)) {
+                    continue;
+                }
+
+                String failure = childText(testCase, "failure");
+                String error = childText(testCase, "error");
+                String name = testCase.getAttribute("name");
+                String resultName = (className.isEmpty() ? testName : className) + "::" + name;
+                String seconds = testCase.getAttribute("time");
+                long duration = 0;
+                try {
+                    duration = (long) (Double.parseDouble(seconds) * 1_000_000_000L);
+                } catch (NumberFormatException ignored) {
+                    // Some test frameworks omit or leave the duration blank.
+                }
+
+                String stderr = !failure.isEmpty() ? failure : error;
+                results.add(new TestResult(
+                    resultName,
+                    failure.isEmpty() && error.isEmpty(),
+                    duration,
+                    childText(testCase, "system-out"),
+                    stderr
+                ));
+            }
+            return results;
+        } catch (ParserConfigurationException | SAXException error) {
+            throw new IOException("cannot parse JUnit XML report " + reportFile + ": " + error.getMessage(), error);
+        }
+    }
+
+    private static String childText(Element parent, String tagName) {
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child instanceof Element element && tagName.equals(element.getTagName())) {
+                return element.getTextContent();
+            }
+        }
+        return "";
     }
 
     private static String argument(String[] args, String name) {
@@ -115,6 +220,158 @@ public class Server {
             }
         }
         return null;
+    }
+
+    private static String[] parseTestNames(String json) {
+        return new JsonStringArrayParser(json).parse();
+    }
+
+    private static String serializeResults(List<TestResult> results) {
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < results.size(); i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append(results.get(i).toJson());
+        }
+        return json.append(']').toString();
+    }
+
+    static String quoteJsonString(String value) {
+        StringBuilder json = new StringBuilder(value.length() + 2).append('"');
+        char[] hex = "0123456789abcdef".toCharArray();
+        for (int i = 0; i < value.length(); i++) {
+            char character = value.charAt(i);
+            switch (character) {
+                case '"' -> json.append("\\\"");
+                case '\\' -> json.append("\\\\");
+                case '\b' -> json.append("\\b");
+                case '\f' -> json.append("\\f");
+                case '\n' -> json.append("\\n");
+                case '\r' -> json.append("\\r");
+                case '\t' -> json.append("\\t");
+                default -> {
+                    if (character < 0x20) {
+                        json.append("\\u00")
+                            .append(hex[(character >> 4) & 0xf])
+                            .append(hex[character & 0xf]);
+                    } else {
+                        json.append(character);
+                    }
+                }
+            }
+        }
+        return json.append('"').toString();
+    }
+
+    private static final class JsonStringArrayParser {
+        private final String input;
+        private int position;
+
+        JsonStringArrayParser(String input) {
+            this.input = input;
+        }
+
+        String[] parse() {
+            List<String> values = new ArrayList<>();
+            skipWhitespace();
+            expect('[');
+            skipWhitespace();
+            if (consume(']')) {
+                finish();
+                return new String[0];
+            }
+
+            while (true) {
+                skipWhitespace();
+                values.add(parseString());
+                skipWhitespace();
+                if (consume(']')) {
+                    finish();
+                    return values.toArray(new String[0]);
+                }
+                expect(',');
+            }
+        }
+
+        private String parseString() {
+            expect('"');
+            StringBuilder value = new StringBuilder();
+            while (position < input.length()) {
+                char character = input.charAt(position++);
+                if (character == '"') {
+                    return value.toString();
+                }
+                if (character < 0x20) {
+                    throw new IllegalArgumentException("unescaped control character in JSON string");
+                }
+                if (character != '\\') {
+                    value.append(character);
+                    continue;
+                }
+                if (position >= input.length()) {
+                    throw new IllegalArgumentException("incomplete escape in JSON string");
+                }
+                char escape = input.charAt(position++);
+                switch (escape) {
+                    case '"', '\\', '/' -> value.append(escape);
+                    case 'b' -> value.append('\b');
+                    case 'f' -> value.append('\f');
+                    case 'n' -> value.append('\n');
+                    case 'r' -> value.append('\r');
+                    case 't' -> value.append('\t');
+                    case 'u' -> value.append(parseUnicodeEscape());
+                    default -> throw new IllegalArgumentException("invalid JSON string escape");
+                }
+            }
+            throw new IllegalArgumentException("unterminated JSON string");
+        }
+
+        private char parseUnicodeEscape() {
+            if (position + 4 > input.length()) {
+                throw new IllegalArgumentException("incomplete unicode escape in JSON string");
+            }
+            int value = 0;
+            for (int i = 0; i < 4; i++) {
+                int digit = Character.digit(input.charAt(position++), 16);
+                if (digit < 0) {
+                    throw new IllegalArgumentException("invalid unicode escape in JSON string");
+                }
+                value = (value << 4) | digit;
+            }
+            return (char) value;
+        }
+
+        private void finish() {
+            skipWhitespace();
+            if (position != input.length()) {
+                throw new IllegalArgumentException("unexpected content after JSON array");
+            }
+        }
+
+        private void skipWhitespace() {
+            while (position < input.length()) {
+                char character = input.charAt(position);
+                if (character != ' ' && character != '\t' && character != '\r' && character != '\n') {
+                    return;
+                }
+                position++;
+            }
+        }
+
+        private boolean consume(char expected) {
+            if (position < input.length() && input.charAt(position) == expected) {
+                position++;
+                return true;
+            }
+            return false;
+        }
+
+        private void expect(char expected) {
+            if (!consume(expected)) {
+                throw new IllegalArgumentException("expected '" + expected + "' in JSON array");
+            }
+        }
     }
 
     public static void main(String[] args) throws IOException {
@@ -145,13 +402,10 @@ public class Server {
                     String line;
                     while ((line = reader.readLine()) != null) {
                         try {
-                            String[] testNames = GSON.fromJson(line, String[].class);
-                            if (testNames == null) {
-                                throw new IllegalArgumentException("request must be a JSON array of test selectors");
-                            }
-                            writer.write(GSON.toJson(runTests(testNames, projectRoot)));
+                            String[] testNames = parseTestNames(line);
+                            writer.write(serializeResults(runTests(testNames, projectRoot)));
                         } catch (RuntimeException error) {
-                            writer.write(GSON.toJson(List.of(
+                            writer.write(serializeResults(List.of(
                                 new TestResult("<daemon>", false, 0, "", error.toString())
                             )));
                         }

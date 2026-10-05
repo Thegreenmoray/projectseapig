@@ -14,7 +14,7 @@ var listCmd = &cobra.Command{
 	Short: "List all available langs that are supported in the project",
 	Long:  `List all available langs that are supported in the project. This command scans the list of available tests and displays the keywords for each test`,
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Info().Msg("python, js, go, java")
+		log.Info().Msg("python, js, go, java,ts,kotlin")
 	},
 }
 

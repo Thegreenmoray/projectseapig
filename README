@@ -34,10 +34,21 @@ Sea Pig executes your unit test suite concurrently across multiple loop iteratio
 ### 🚀 Planned Future Languages
 Ruby • PHP • Elixir • C# / .NET • Swift • Dart / Flutter • Rust • C / C++
 
-The Java/Kotlin daemon JAR must be built from the Sea Pig checkout before use:
+Java/Kotlin builds require a JDK. Sea Pig builds its Java daemon automatically with `javac` when Maven or Gradle is unavailable. To package it manually, run one of these from the Sea Pig checkout root:
 
 ```bash
 gradle -p servers jar
+# or
+mvn -f servers/pom.xml package
+```
+
+For Java/Kotlin test projects, run from the target project root and provide either its `gradlew`/`mvnw` wrapper or the matching build tool on `PATH`.
+
+Please ensure if running maven, install it into your system path or it will not work. You can download maven from [here](https://maven.apache.org/download.cgi) and follow the installation instructions for your operating system.
+
+Install JS/TS daemon dependencies from the Sea Pig checkout root:
+
+```bash
 npm ci --prefix servers
 ```
 

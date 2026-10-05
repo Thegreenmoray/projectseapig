@@ -1,10 +1,15 @@
 package daemons
 
 import (
+	"bufio"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Justi/projectseapig/runners"
@@ -31,6 +36,9 @@ type GoCompiler struct {
 	CompiledPath string //compiled binary path
 	Timeout      time.Duration
 	Runner       CommandRunner
+	packageMu    sync.Mutex
+	packageBins  map[string]string
+	generated    []string
 }
 
 func (gc *GoCompiler) getRunner() CommandRunner {
@@ -41,13 +49,35 @@ func (gc *GoCompiler) getRunner() CommandRunner {
 }
 
 func (gc *GoCompiler) Start() error {
+	if err := os.MkdirAll(filepath.Dir(gc.CompiledPath), 0755); err != nil {
+		return fmt.Errorf("cannot create Go test binary directory: %w", err)
+	}
 	runner := gc.getRunner()
-	_, err := runner.Run("go", "test", "-c", "-o", gc.CompiledPath, gc.ProjectPath)
-	return err
+	output, err := runner.Run("go", "test", "-c", "-o", gc.CompiledPath, gc.ProjectPath)
+	if err != nil {
+		return fmt.Errorf("failed to compile Go tests for %s: %w | output: %s", gc.ProjectPath, err, strings.TrimSpace(string(output)))
+	}
+	gc.packageMu.Lock()
+	gc.packageBins = make(map[string]string)
+	gc.generated = []string{gc.CompiledPath}
+	gc.packageMu.Unlock()
+	return nil
 }
 
 func (gc *GoCompiler) Stop() error {
-	return os.Remove(gc.CompiledPath)
+	gc.packageMu.Lock()
+	paths := append([]string(nil), gc.generated...)
+	gc.packageBins = nil
+	gc.generated = nil
+	gc.packageMu.Unlock()
+
+	var firstErr error
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (gc *GoCompiler) RunTests(batchoftests []string) ([]runners.TestResult, error) {
@@ -55,28 +85,91 @@ func (gc *GoCompiler) RunTests(batchoftests []string) ([]runners.TestResult, err
 		return nil, nil
 	}
 
-	// 1. Join test names with regex OR operator: ^(TestA|TestB|TestC)$
-	regexPattern := fmt.Sprintf("^%s$", strings.Join(batchoftests, "|"))
+	results := make([]runners.TestResult, 0, len(batchoftests))
+	for _, selector := range batchoftests {
+		packagePath, testName := splitGoTestSelector(selector)
+		compiledPath := gc.CompiledPath
+		if packagePath != "" {
+			var err error
+			compiledPath, err = gc.packageBinary(packagePath)
+			if err != nil {
+				return nil, err
+			}
+		}
+		pattern := "^" + regexp.QuoteMeta(testName) + "$"
+		start := time.Now()
+		output, runErr := gc.getRunner().Run(compiledPath, "-test.v", "-test.run", pattern)
+		passed, reported := goTestResult(output, testName)
+		if runErr != nil {
+			passed = false
+		}
 
-	start := time.Now()
-	output, _ := gc.getRunner().Run(gc.CompiledPath, "-test.v", "-test.run", regexPattern)
-	duration := time.Since(start)
-
-	// 2. Map results back to individual test names
-	stdoutStr := string(output)
-	var results []runners.TestResult
-
-	for _, testName := range batchoftests {
-		// Go test runner outputs "--- PASS: TestName" or "--- FAIL: TestName"
-		passed := strings.Contains(stdoutStr, fmt.Sprintf("--- PASS: %s", testName))
-
-		results = append(results, runners.TestResult{
-			Testname:  testName,
+		result := runners.TestResult{
+			Testname:  selector,
 			Passed:    passed,
-			Stdout:    stdoutStr,                                   // or extract individual slice if parsing stdout
-			Timetaken: duration / time.Duration(len(batchoftests)), // average time per test in batch
-		})
+			Timetaken: time.Since(start),
+			Stdout:    string(output),
+		}
+		if runErr != nil {
+			result.Exitcode = 1
+			result.Stderr = runErr.Error()
+		} else if !reported {
+			result.Stderr = fmt.Sprintf("compiled Go test binary did not report a result for %s", selector)
+		}
+		results = append(results, result)
 	}
 
 	return results, nil
+}
+
+func splitGoTestSelector(selector string) (string, string) {
+	separator := strings.LastIndex(selector, "::")
+	if separator < 0 {
+		return "", selector
+	}
+	return selector[:separator], selector[separator+2:]
+}
+
+func (gc *GoCompiler) packageBinary(packagePath string) (string, error) {
+	gc.packageMu.Lock()
+	defer gc.packageMu.Unlock()
+	if binary, ok := gc.packageBins[packagePath]; ok {
+		return binary, nil
+	}
+	if gc.packageBins == nil {
+		gc.packageBins = make(map[string]string)
+	}
+
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(packagePath))
+	extension := filepath.Ext(gc.CompiledPath)
+	base := strings.TrimSuffix(gc.CompiledPath, extension)
+	binary := fmt.Sprintf("%s-%08x%s", base, hash.Sum32(), extension)
+	if err := os.MkdirAll(filepath.Dir(binary), 0755); err != nil {
+		return "", fmt.Errorf("cannot create Go package binary directory: %w", err)
+	}
+	output, err := gc.getRunner().Run("go", "test", "-c", "-o", binary, packagePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to compile Go package %s: %w | output: %s", packagePath, err, strings.TrimSpace(string(output)))
+	}
+	gc.packageBins[packagePath] = binary
+	gc.generated = append(gc.generated, binary)
+	return binary, nil
+}
+
+func goTestResult(output []byte, testName string) (bool, bool) {
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 3 || fields[0] != "---" || fields[2] != testName {
+			continue
+		}
+		switch strings.TrimSuffix(fields[1], ":") {
+		case "PASS":
+			return true, true
+		case "FAIL":
+			return false, true
+		}
+	}
+	return false, false
 }

@@ -23,6 +23,9 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	if g.Timeout <= 0 {
 		return nil, fmt.Errorf("Time is too short, please enter something larger than 0")
 	}
+	if discoveryTimeout < 2*time.Minute {
+		discoveryTimeout = 2 * time.Minute
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout)
 	defer cancel()
@@ -32,8 +35,6 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 		bin = "go"
 	}
 
-	// Try scanning all subpackages
-	cmd := exec.CommandContext(ctx, bin, "test", "-list", ".*", "./...")
 	projectPath = filepath.Clean(projectPath)
 	info, err := os.Stat(projectPath)
 	if err != nil {
@@ -45,33 +46,34 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
 	}
-	cmd.Dir = projectPath
-
-	out, err := cmd.CombinedOutput()
-
-	// Parse whatever output was generated
-	lines := strings.Split(string(out), "\n")
-	var tests []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if parts := strings.Fields(line); len(parts) > 0 && strings.HasPrefix(parts[0], "Test") {
-			tests = append(tests, parts[0])
+	listPackages := exec.CommandContext(ctx, bin, "list", "./...")
+	listPackages.Dir = projectPath
+	packageOutput, err := listPackages.CombinedOutput()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("Go test discovery timed out after %v: %w", discoveryTimeout, ctx.Err())
+	}
+	if err != nil {
+		if strings.Contains(string(packageOutput), "does not contain main module") || strings.Contains(string(packageOutput), "go.mod file not found") {
+			return nil, fmt.Errorf("no Go tests found in %s; Go tests must be func Test... declarations in *_test.go files, so check that --lang matches this project", projectPath)
 		}
+		return nil, fmt.Errorf("go list ./... failed: %w | output: %s", err, strings.TrimSpace(string(packageOutput)))
 	}
 
-	// If subpackages failed, attempt listing the local directory package
-	if len(tests) == 0 {
-		cmdLocal := exec.CommandContext(ctx, bin, "test", "-list", ".*", ".")
-		cmdLocal.Dir = projectPath
-		outLocal, errLocal := cmdLocal.CombinedOutput()
-		if errLocal != nil && len(outLocal) == 0 {
-			return nil, fmt.Errorf("go test -list failed: %v | output: %s", err, string(out))
+	var tests []string
+	for _, packagePath := range strings.Fields(string(packageOutput)) {
+		listPackageTests := exec.CommandContext(ctx, bin, "test", "-list", ".*", packagePath)
+		listPackageTests.Dir = projectPath
+		output, err := listPackageTests.CombinedOutput()
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("Go test discovery timed out after %v: %w", discoveryTimeout, ctx.Err())
 		}
-
-		for _, line := range strings.Split(string(outLocal), "\n") {
+		if err != nil {
+			return nil, fmt.Errorf("go test -list failed for %s: %w | output: %s", packagePath, err, strings.TrimSpace(string(output)))
+		}
+		for _, line := range strings.Split(string(output), "\n") {
 			line = strings.TrimSpace(line)
 			if parts := strings.Fields(line); len(parts) > 0 && strings.HasPrefix(parts[0], "Test") {
-				tests = append(tests, parts[0])
+				tests = append(tests, packagePath+"::"+parts[0])
 			}
 		}
 	}
