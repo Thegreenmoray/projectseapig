@@ -1,8 +1,10 @@
 package daemons
 
 import (
+	"archive/zip"
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +36,33 @@ func (j *JavaDaemon) getDialer() SocketDialer {
 		return &RealSocketDialer{}
 	}
 	return j.Dialer
+}
+
+func javaExecutablePath() (string, error) {
+	javaPath, err := exec.LookPath("java")
+	if err != nil {
+		return "", err
+	}
+	output, err := exec.Command(javaPath, "-XshowSettings:properties", "-version").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("cannot inspect Java runtime: %w\n%s", err, strings.TrimSpace(string(output)))
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok || strings.TrimSpace(key) != "java.home" {
+			continue
+		}
+		executable := filepath.Join(strings.TrimSpace(value), "bin", "java")
+		if os.PathSeparator == '\\' {
+			executable += ".exe"
+		}
+		if _, err := os.Stat(executable); err != nil {
+			return "", fmt.Errorf("Java runtime executable %q is unavailable: %w", executable, err)
+		}
+		return executable, nil
+	}
+	return "", fmt.Errorf("Java runtime did not report java.home")
 }
 
 func (j *JavaDaemon) ensureServerJar() error {
@@ -84,10 +113,6 @@ func (j *JavaDaemon) buildServerJarWithJDK(serverDir string) error {
 	if err != nil {
 		return fmt.Errorf("Java daemon JAR is missing and no Maven/Gradle build tool is available; install a JDK with javac or provide a Maven/Gradle wrapper: %w", err)
 	}
-	jar, err := exec.LookPath("jar")
-	if err != nil {
-		return fmt.Errorf("Java daemon JAR is missing and the JDK jar tool is unavailable: %w", err)
-	}
 	classesDir, err := os.MkdirTemp("", "seapig-java-classes-*")
 	if err != nil {
 		return fmt.Errorf("cannot create Java daemon build directory: %w", err)
@@ -102,10 +127,75 @@ func (j *JavaDaemon) buildServerJarWithJDK(serverDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to compile Java daemon with javac: %w\n%s", err, strings.TrimSpace(string(output)))
 	}
-	output, err = exec.Command(jar, "--create", "--file", j.DaemonPath, "--main-class", "servers.Server", "-C", classesDir, ".").CombinedOutput()
+	if err := createServerJar(classesDir, j.DaemonPath); err != nil {
+		return fmt.Errorf("failed to package Java daemon: %w", err)
+	}
+	return nil
+}
+
+func createServerJar(classesDir, jarPath string) (resultErr error) {
+	jarFile, err := os.OpenFile(jarPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
-		_ = os.Remove(j.DaemonPath)
-		return fmt.Errorf("failed to package Java daemon with jar: %w\n%s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("cannot create daemon JAR %q: %w", jarPath, err)
+	}
+	defer func() {
+		if err := jarFile.Close(); resultErr == nil && err != nil {
+			resultErr = fmt.Errorf("cannot close daemon JAR %q: %w", jarPath, err)
+		}
+		if resultErr != nil {
+			_ = os.Remove(jarPath)
+		}
+	}()
+
+	archive := zip.NewWriter(jarFile)
+	manifest, err := archive.Create("META-INF/MANIFEST.MF")
+	if err != nil {
+		return fmt.Errorf("cannot create daemon JAR manifest: %w", err)
+	}
+	if _, err := io.WriteString(manifest, "Manifest-Version: 1.0\r\nMain-Class: servers.Server\r\n\r\n"); err != nil {
+		return fmt.Errorf("cannot write daemon JAR manifest: %w", err)
+	}
+
+	err = filepath.WalkDir(classesDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		relativePath, err := filepath.Rel(classesDir, path)
+		if err != nil {
+			return err
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+
+		jarEntry, err := archive.Create(filepath.ToSlash(relativePath))
+		if err != nil {
+			_ = file.Close()
+			return err
+		}
+		if _, err := io.Copy(jarEntry, file); err != nil {
+			_ = file.Close()
+			return err
+		}
+		return file.Close()
+	})
+	if err != nil {
+		_ = archive.Close()
+		return fmt.Errorf("cannot add daemon classes to JAR: %w", err)
+	}
+	if err := archive.Close(); err != nil {
+		return fmt.Errorf("cannot finalize daemon JAR: %w", err)
 	}
 	return nil
 }
@@ -232,7 +322,16 @@ func (j *JavaDaemon) Start() error {
 		"--project-root", j.ProjectRoot,
 	}
 
-	proc, stdoutPipe, err := j.getExecutor().StartCommand("java", args...)
+	executor := j.getExecutor()
+	javaCommand := "java"
+	if _, isRealExecutor := executor.(*RealCommandExecutor); isRealExecutor {
+		var err error
+		javaCommand, err = javaExecutablePath()
+		if err != nil {
+			return fmt.Errorf("cannot resolve Java runtime executable: %w", err)
+		}
+	}
+	proc, stdoutPipe, err := executor.StartCommand(javaCommand, args...)
 	if err != nil {
 		return fmt.Errorf("cannot startup Java daemon: %w", err)
 	}

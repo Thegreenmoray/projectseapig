@@ -47,6 +47,8 @@ async function runJestTests(testPaths: string[]): Promise<TestResult[]> {
             const options: any = {
                 runInBand: true,
                 silent: true,
+                reporters: [],
+                watch: false,
                 _: [testPath]
             };
             if (!hasJestConfig(projectRoot)) {
@@ -146,7 +148,9 @@ function main(): void {
                                 stderr: error?.message || String(error)
                             }];
                         }
-                        //if (!socket.destroyed) socket.write(JSON.stringify(results) + '\n');
+                        if (!socket.destroyed) {
+                            socket.write(JSON.stringify(results) + '\n');
+                        }
                     });
                 }
             }

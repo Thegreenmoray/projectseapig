@@ -50,7 +50,7 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	listPackages.Dir = projectPath
 	packageOutput, err := listPackages.CombinedOutput()
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("Go test discovery timed out after %v: %w", discoveryTimeout, ctx.Err())
+		return nil, fmt.Errorf("Go test discovery timed out after %v: %w, Maybe there's a database/AI agent being called?, or otherwise a process being stalled?", discoveryTimeout, ctx.Err())
 	}
 	if err != nil {
 		if strings.Contains(string(packageOutput), "does not contain main module") || strings.Contains(string(packageOutput), "go.mod file not found") {

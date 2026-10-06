@@ -2,6 +2,7 @@ package daemons
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,6 +165,72 @@ func TestAllDaemons_FullLifecycle(t *testing.T) {
 	}
 }
 
+func TestDaemonBaseRunTestsSerializesSocketRequests(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	const requestCount = 20
+	daemon := &DaemonBase{Conn: client}
+	serverDone := make(chan error, 1)
+	go func() {
+		decoder := json.NewDecoder(server)
+		encoder := json.NewEncoder(server)
+		for i := 0; i < requestCount; i++ {
+			var names []string
+			if err := decoder.Decode(&names); err != nil {
+				serverDone <- err
+				return
+			}
+			if len(names) != 1 {
+				serverDone <- fmt.Errorf("request %d contained %d test names", i, len(names))
+				return
+			}
+			if err := encoder.Encode([]runners.TestResult{{Testname: names[0], Passed: true}}); err != nil {
+				serverDone <- err
+				return
+			}
+		}
+		serverDone <- nil
+	}()
+
+	var wg sync.WaitGroup
+	errors := make(chan error, requestCount)
+	for i := 0; i < requestCount; i++ {
+		name := fmt.Sprintf("Test%d", i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results, err := daemon.RunTests([]string{name})
+			if err != nil {
+				errors <- err
+				return
+			}
+			if len(results) != 1 || results[0].Testname != name {
+				errors <- fmt.Errorf("request %s received mismatched results: %+v", name, results)
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("concurrent socket requests did not complete")
+	}
+	close(errors)
+	for err := range errors {
+		t.Error(err)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("mock daemon failed: %v", err)
+	}
+}
+
 func TestDaemonsAcceptTCPReadyHandshake(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -282,7 +350,7 @@ func TestJavaServerJarRebuildsWhenSourceChanges(t *testing.T) {
 }
 
 func TestJavaDaemonBuildsAndStartsWithJDKOnly(t *testing.T) {
-	for _, tool := range []string{"java", "javac", "jar"} {
+	for _, tool := range []string{"java", "javac"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			t.Skipf("%s is unavailable", tool)
 		}

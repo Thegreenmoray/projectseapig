@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/Justi/projectseapig/runners"
 )
@@ -20,6 +21,7 @@ type DaemonBase struct {
 	Proc       ProcessRunner // Replaces raw *exec.Cmd for safe mocking
 	Langtype   string
 	Socketpath string
+	requestMu  sync.Mutex
 }
 
 func (p *DaemonBase) Stop() error {
@@ -52,6 +54,9 @@ func (p *DaemonBase) RunTests(testNames []string) ([]runners.TestResult, error) 
 	if p.Conn == nil {
 		return nil, fmt.Errorf("cannot run tests: socket connection is nil")
 	}
+
+	p.requestMu.Lock()
+	defer p.requestMu.Unlock()
 
 	// Send batch over socket
 	if err := json.NewEncoder(p.Conn).Encode(testNames); err != nil {

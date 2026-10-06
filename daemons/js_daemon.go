@@ -96,6 +96,5 @@ func (t *JsDaemon) Start() error {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	fmt.Println("Jest Daemon running successfully!")
 	return nil
 }
