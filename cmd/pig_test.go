@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -28,11 +29,35 @@ func (m *MockPigRunner) RunTes(t string) (runners.TestResult, error) {
 
 // --- TEST 1: Worker Pipeline Success ---
 func TestSwap(t *testing.T) {
-	heap := &IntHeap{}
-	heap.Push(Pair{Time: -int32(90), Testname: "ddd"})
-	heap.Push(Pair{Time: -int32(50), Testname: "ddd"})
-	heap.Swap(1, 0)
-	heap.Less(1, 0)
+	queue := &IntHeap{}
+	heap.Init(queue)
+	heap.Push(queue, Pair{Time: 5_000_000_000, Testname: "long"})
+	heap.Push(queue, Pair{Time: 3_000_000_000, Testname: "medium"})
+	heap.Push(queue, Pair{Time: 1_000_000_000, Testname: "short"})
+
+	for _, want := range []string{"long", "medium", "short"} {
+		if got := heap.Pop(queue).(Pair).Testname; got != want {
+			t.Fatalf("heap popped %q, want %q", got, want)
+		}
+	}
+}
+
+func TestGreedyScheduleRunsLongestTestsFirst(t *testing.T) {
+	tests := []string{"short", "long", "medium"}
+	durations := map[string]int64{
+		"short_0":  1_000_000_000,
+		"long_0":   5_000_000_000,
+		"medium_0": 3_000_000_000,
+	}
+
+	got := greedySchedule(tests, 1, 2, durations)
+	want := [][]string{
+		{"long", "medium"},
+		{"short"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("greedySchedule() = %v, want %v", got, want)
+	}
 }
 
 func TestRunCmd_Success(t *testing.T) {
@@ -57,7 +82,7 @@ func TestRunCmd_Success(t *testing.T) {
 		n := 1 // run count per test
 		for _, testName := range tests {
 			sampleTime := hashmap[testName]
-			heap.Push(h, Pair{Time: -int32(sampleTime), Testname: testName})
+			heap.Push(h, Pair{Time: sampleTime, Testname: testName})
 		}
 
 		cpucores := 2

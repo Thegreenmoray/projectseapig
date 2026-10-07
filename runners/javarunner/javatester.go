@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
-
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
-	// Ensure your runners import is here
+)
+
+var (
+	sourcePackagePattern = regexp.MustCompile(`(?m)^\s*package\s+([\w.]+)`)
+	kotlinClassPattern   = regexp.MustCompile(`\b(?:class|object)\s+([A-Za-z_][A-Za-z0-9_]*)`)
 )
 
 type Javatester struct {
@@ -71,27 +75,36 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 			}
 
 			if !info.IsDir() {
-				var ext string
-				name := info.Name()
-
-				// Match Java or Kotlin test naming conventions
-				if strings.HasSuffix(name, "Test.java") || strings.HasSuffix(name, "Tests.java") {
-					ext = ".java"
-				} else if strings.HasSuffix(name, "Test.kt") || strings.HasSuffix(name, "Tests.kt") {
-					ext = ".kt"
+				name := strings.ToLower(info.Name())
+				ext := filepath.Ext(name)
+				if (ext != ".java" && ext != ".kt") ||
+					(!strings.HasSuffix(name, "test"+ext) && !strings.HasSuffix(name, "tests"+ext)) {
+					return nil
 				}
 
-				if ext != "" {
-					relPath, err := filepath.Rel(searchPath, path)
-					if err != nil {
-						return err
+				source, err := os.ReadFile(path)
+				if err != nil {
+					return fmt.Errorf("cannot read test source %q: %w", path, err)
+				}
+
+				relPath, err := filepath.Rel(searchPath, path)
+				if err != nil {
+					return err
+				}
+				className := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
+				if ext == ".kt" {
+					className = kotlinTestClassName(source, className)
+				}
+
+				packageName := sourcePackagePattern.FindSubmatch(source)
+				if len(packageName) > 1 {
+					tests = append(tests, string(packageName[1])+"."+className)
+				} else {
+					relativeDir := filepath.Dir(relPath)
+					if relativeDir != "." {
+						className = strings.ReplaceAll(relativeDir, string(os.PathSeparator), ".") + "." + className
 					}
-
-					// Strip the specific extension (.java or .kt) and convert separators to dots
-					cleanPath := strings.TrimSuffix(relPath, ext)
-					fqcn := strings.ReplaceAll(cleanPath, string(os.PathSeparator), ".")
-
-					tests = append(tests, fqcn)
+					tests = append(tests, className)
 				}
 			}
 			return nil
@@ -107,4 +120,16 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 	}
 
 	return tests, nil
+}
+
+func kotlinTestClassName(source []byte, fileName string) string {
+	for _, match := range kotlinClassPattern.FindAllSubmatch(source, -1) {
+		className := string(match[1])
+		lowerClassName := strings.ToLower(className)
+		if strings.HasSuffix(lowerClassName, "test") || strings.HasSuffix(lowerClassName, "tests") {
+			return className
+		}
+	}
+
+	return fileName + "Kt"
 }

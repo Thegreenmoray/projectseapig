@@ -87,7 +87,7 @@ func TestBoltRepo_SavePigtime_And_Extractpigtime(t *testing.T) {
 
 	pig := &runners.Pig{
 		Run: []runners.TestResult{
-			{Testname: "TestDBConnect", Passed: true, Timetaken: 200 * time.Millisecond},
+			{Testname: "TestDBConnect", Passed: true, Timetaken: 5 * time.Second},
 			{Testname: "TestDBClose", Passed: true, Timetaken: 50 * time.Millisecond},
 		},
 	}
@@ -107,11 +107,11 @@ func TestBoltRepo_SavePigtime_And_Extractpigtime(t *testing.T) {
 	expectedKey0 := "SuiteDatabase_0"
 	expectedKey1 := "SuiteDatabase_1"
 
-	if val, ok := timesMap[expectedKey0]; !ok || val != int((200*time.Millisecond).Nanoseconds()) {
-		t.Errorf("Expected %d ns for key %s, got %d", (200 * time.Millisecond).Nanoseconds(), expectedKey0, val)
+	if val, ok := timesMap[expectedKey0]; !ok || val != (5*time.Second).Nanoseconds() {
+		t.Errorf("Expected %d ns for key %s, got %d", (5 * time.Second).Nanoseconds(), expectedKey0, val)
 	}
 
-	if val, ok := timesMap[expectedKey1]; !ok || val != int((50*time.Millisecond).Nanoseconds()) {
+	if val, ok := timesMap[expectedKey1]; !ok || val != (50*time.Millisecond).Nanoseconds() {
 		t.Errorf("Expected %d ns for key %s, got %d", (50 * time.Millisecond).Nanoseconds(), expectedKey1, val)
 	}
 }

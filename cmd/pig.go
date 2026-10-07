@@ -30,30 +30,23 @@ var l string
 var deep bool
 
 type Pair struct {
-	Time     int32
+	Time     int64
 	Testname string
 }
 
-// FloatHeap is a min-heap of float32.
+// IntHeap is a max-heap so tests with the longest previous runtimes run first.
 type IntHeap []Pair
 
-// 1. Len is part of sort.Interface.
 func (h IntHeap) Len() int { return len(h) }
 
-// 2. Less is part of sort.Interface. Determines min vs max heap.
 func (h IntHeap) Less(i, j int) bool { return h[i].Time > h[j].Time }
 
-// 3. Swap is part of sort.Interface.
 func (h IntHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 
-// 4. Push adds an element to the underlying slice.
-// Pointer receiver is required because it modifies the slice's length.
 func (h *IntHeap) Push(x any) {
 	*h = append(*h, x.(Pair))
 }
 
-// 5. Pop removes the last element from the underlying slice.
-// Pointer receiver is required because it modifies the slice's length.
 func (h *IntHeap) Pop() any {
 	old := *h
 	n := len(old)
@@ -100,43 +93,14 @@ var pigCmd = &cobra.Command{
 			n = factory.Cfg.Workers
 		}
 
-		h := &IntHeap{}
-		heap.Init(h)
-
 		totalExpectedResults := len(tests) * n
 		b, _ := logs.NewBoltRepo("TestTime")
 		hashmap, _ := b.Extractpigtime()
 		c := make(chan []runners.TestResult, totalExpectedResults)
 
-		for _, testName := range tests {
-			samplebbolttime := hashmap[testName]
-			if samplebbolttime == 0 {
-				samplebbolttime = hashmap[fmt.Sprintf("%s_0", testName)]
-			}
-
-			for i := 0; i < n; i++ {
-				heap.Push(h, Pair{Time: int32(samplebbolttime), Testname: testName})
-			}
-		}
-
 		cpucores := runtime.GOMAXPROCS(0) * 2
 
-		// Bug 1 Fix: Build dynamic slices without empty trailing slots
-		var sliceofslices [][]string
-		currentChunk := make([]string, 0, cpucores)
-
-		for h.Len() > 0 {
-			pair := heap.Pop(h).(Pair)
-			currentChunk = append(currentChunk, pair.Testname)
-
-			if len(currentChunk) == cpucores {
-				sliceofslices = append(sliceofslices, currentChunk)
-				currentChunk = make([]string, 0, cpucores)
-			}
-		}
-		if len(currentChunk) > 0 {
-			sliceofslices = append(sliceofslices, currentChunk)
-		}
+		sliceofslices := greedySchedule(tests, n, cpucores, hashmap)
 
 		bar := progressbar.NewOptions(totalExpectedResults,
 			progressbar.OptionEnableColorCodes(true),
@@ -211,6 +175,35 @@ var pigCmd = &cobra.Command{
 
 		results1(errorOutputs, repo, testing)
 	}}
+
+func greedySchedule(tests []string, runs, workers int, durations map[string]int64) [][]string {
+	if workers < 1 {
+		workers = 1
+	}
+
+	queue := &IntHeap{}
+	heap.Init(queue)
+	for _, testName := range tests {
+		duration := durations[testName]
+		if duration == 0 {
+			duration = durations[fmt.Sprintf("%s_0", testName)]
+		}
+		for i := 0; i < runs; i++ {
+			heap.Push(queue, Pair{Time: duration, Testname: testName})
+		}
+	}
+
+	var batches [][]string
+	for queue.Len() > 0 {
+		batch := make([]string, 0, workers)
+		for len(batch) < workers && queue.Len() > 0 {
+			pair := heap.Pop(queue).(Pair)
+			batch = append(batch, pair.Testname)
+		}
+		batches = append(batches, batch)
+	}
+	return batches
+}
 
 //a little messy up here, may want to break this up
 

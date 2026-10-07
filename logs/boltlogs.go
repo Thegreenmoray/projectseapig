@@ -82,8 +82,8 @@ func (r *BoltRepo) SavePigtime(testName string, pig *runners.Pig) error {
 	})
 }
 
-func (r *BoltRepo) Extractpigtime() (map[string]int, error) {
-	results := make(map[string]int)
+func (r *BoltRepo) Extractpigtime() (map[string]int64, error) {
+	results := make(map[string]int64)
 
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte("TestTime"))
@@ -98,7 +98,7 @@ func (r *BoltRepo) Extractpigtime() (map[string]int, error) {
 				return fmt.Errorf("failed to parse test time for key %s: %w", string(k), err)
 			}
 
-			results[string(k)] = int(durationNs)
+			results[string(k)] = durationNs
 		}
 
 		return nil
