@@ -34,12 +34,12 @@ type Pair struct {
 	Testname string
 }
 
-// IntHeap is a max-heap so tests with the longest previous runtimes run first.
+// IntHeap schedules tests with the shortest previous runtimes first.
 type IntHeap []Pair
 
 func (h IntHeap) Len() int { return len(h) }
 
-func (h IntHeap) Less(i, j int) bool { return h[i].Time > h[j].Time }
+func (h IntHeap) Less(i, j int) bool { return h[i].Time < h[j].Time }
 
 func (h IntHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 
@@ -63,8 +63,7 @@ var pigCmd = &cobra.Command{
 	. WARNING this process can be Long and CPU intensive, you will be given a chance
 	 to back out if you are not ready`,
 	Run: func(cmd *cobra.Command, args []string) {
-		loopFlag, _ := cmd.Flags().GetInt("loop")
-		n = loopFlag
+		n = configuredLoopCount(cmd)
 
 		cancontinue, tester := verification()
 		if !cancontinue {
@@ -89,13 +88,32 @@ var pigCmd = &cobra.Command{
 			return
 		}
 
-		if n == 10 && factory.Cfg.Workers > 0 {
-			n = factory.Cfg.Workers
+		timingRepo, err := logs.NewBoltRepo("seapig.db")
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open test timing history")
+			return
 		}
-
+		hashmap, err := timingRepo.Extractpigtime()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to read test timing history")
+			_ = timingRepo.Close()
+			return
+		}
+		timedOutTests, err := timingRepo.ExtractTimedOutTests()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to read timed-out test history")
+			_ = timingRepo.Close()
+			return
+		}
+		if err := timingRepo.Close(); err != nil {
+			log.Error().Err(err).Msg("failed to close test timing history")
+		}
+		tests = excludeTimedOutTests(tests, timedOutTests)
+		if len(tests) == 0 {
+			log.Info().Msg("No tests to run: all discovered tests have timed out previously")
+			return
+		}
 		totalExpectedResults := len(tests) * n
-		b, _ := logs.NewBoltRepo("TestTime")
-		hashmap, _ := b.Extractpigtime()
 		c := make(chan []runners.TestResult, totalExpectedResults)
 
 		cpucores := runtime.GOMAXPROCS(0) * 2
@@ -135,6 +153,15 @@ var pigCmd = &cobra.Command{
 			if err != nil {
 				log.Error().Err(err).Msgf("Daemon execution failed for batch: %v", args.testNames)
 				return
+			}
+			for index := range results {
+				if !isTimedOutResult(results[index]) {
+					continue
+				}
+				if results[index].Metadata == nil {
+					results[index].Metadata = make(map[string]string)
+				}
+				results[index].Metadata["seapig_selector"] = testSelectorForResult(results[index].Testname, args.testNames)
 			}
 
 			if len(results) > 0 {
@@ -176,6 +203,14 @@ var pigCmd = &cobra.Command{
 		results1(errorOutputs, repo, testing)
 	}}
 
+func configuredLoopCount(cmd *cobra.Command) int {
+	loopFlag, _ := cmd.Flags().GetInt("loop")
+	if !cmd.Flags().Changed("loop") && factory.Cfg.Workers > 0 {
+		return factory.Cfg.Workers
+	}
+	return loopFlag
+}
+
 func greedySchedule(tests []string, runs, workers int, durations map[string]int64) [][]string {
 	if workers < 1 {
 		workers = 1
@@ -205,6 +240,16 @@ func greedySchedule(tests []string, runs, workers int, durations map[string]int6
 	return batches
 }
 
+func excludeTimedOutTests(tests []string, timedOut map[string]bool) []string {
+	filtered := make([]string, 0, len(tests))
+	for _, testName := range tests {
+		if !timedOut[testName] {
+			filtered = append(filtered, testName)
+		}
+	}
+	return filtered
+}
+
 //a little messy up here, may want to break this up
 
 // go implictly casts a struct as an interface if an interface is requested
@@ -228,6 +273,18 @@ func results1(errorOutputs map[string]string, repo *logs.BoltRepo, testing map[s
 
 		if err := repo.SavePig(testName, &batchResult); err != nil {
 			log.Error().Err(err).Msgf(factory.Red+"failed to save logs for %s", testName)
+		}
+		for _, result := range runs {
+			if isTimedOutResult(result) {
+				selector := result.Testname
+				if result.Metadata != nil && result.Metadata["seapig_selector"] != "" {
+					selector = result.Metadata["seapig_selector"]
+				}
+				if err := repo.SaveTimedOutTest(selector); err != nil {
+					log.Error().Err(err).Msgf(factory.Red+"failed to exclude timed-out test %s", selector)
+				}
+				break
+			}
 		}
 	}
 	log.Info().Msg(factory.Green + "The Herd has finished." + factory.Reset)

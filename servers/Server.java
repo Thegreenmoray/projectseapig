@@ -15,6 +15,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import org.w3c.dom.Element;
@@ -28,26 +29,33 @@ class TestResult {
     final long timeTaken;
     final String stdout;
     final String stderr;
+    final boolean timedOut;
 
     TestResult(String testName, boolean passed, long timeTaken, String stdout, String stderr) {
+		this(testName, passed, timeTaken, stdout, stderr, false);
+	}
+
+	TestResult(String testName, boolean passed, long timeTaken, String stdout, String stderr, boolean timedOut) {
         this.testName = testName;
         this.passed = passed;
         this.timeTaken = timeTaken;
         this.stdout = stdout;
         this.stderr = stderr;
+        this.timedOut = timedOut;
     }
 
     String toJson() {
         return "{\"test_name\":" + Server.quoteJsonString(testName)
             + ",\"passed\":" + passed
             + ",\"time_taken\":" + timeTaken
+            + ",\"timed_out\":" + timedOut
             + ",\"stdout\":" + Server.quoteJsonString(stdout)
             + ",\"stderr\":" + Server.quoteJsonString(stderr) + "}";
     }
 }
 
 public class Server {
-    private static List<TestResult> runTest(String testName, Path projectRoot) {
+    private static List<TestResult> runTest(String testName, Path projectRoot, long timeoutMs) {
         List<String> command = new ArrayList<>();
         Path gradleBuild = projectRoot.resolve("build.gradle");
         Path gradleKotlinBuild = projectRoot.resolve("build.gradle.kts");
@@ -97,13 +105,30 @@ public class Server {
         }
 
         long start = System.nanoTime();
+        Path outputFile = null;
         try {
+            outputFile = Files.createTempFile(projectRoot, ".seapig-test-", ".log");
             Process process = new ProcessBuilder(command)
                 .directory(projectRoot.toFile())
                 .redirectErrorStream(true)
+                .redirectOutput(outputFile.toFile())
                 .start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            int exitCode = process.waitFor();
+            if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+                process.waitFor();
+                String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+                return List.of(new TestResult(
+                    testName,
+                    false,
+                    System.nanoTime() - start,
+                    output,
+                    "test timed out after " + timeoutMs + " ms",
+                    true
+                ));
+            }
+            String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+            int exitCode = process.exitValue();
             long duration = System.nanoTime() - start;
             List<TestResult> junitResults = readJUnitResults(projectRoot, testName);
             if (!junitResults.isEmpty()) {
@@ -115,13 +140,21 @@ public class Server {
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             return List.of(new TestResult(testName, false, System.nanoTime() - start, "", "Test execution interrupted"));
+        } finally {
+            if (outputFile != null) {
+                try {
+                    Files.deleteIfExists(outputFile);
+                } catch (IOException ignored) {
+                    // Keep cleanup failure from masking the test result.
+                }
+            }
         }
     }
 
-    private static List<TestResult> runTests(String[] testNames, Path projectRoot) {
+    private static List<TestResult> runTests(String[] testNames, Path projectRoot, long timeoutMs) {
         List<TestResult> results = new ArrayList<>();
         for (String testName : testNames) {
-            results.addAll(runTest(testName, projectRoot));
+            results.addAll(runTest(testName, projectRoot, timeoutMs));
         }
         return results;
     }
@@ -194,7 +227,8 @@ public class Server {
                     failure.isEmpty() && error.isEmpty(),
                     duration,
                     childText(testCase, "system-out"),
-                    stderr
+                    stderr,
+                    isTimeoutMessage(stderr)
                 ));
             }
             return results;
@@ -221,6 +255,11 @@ public class Server {
             }
         }
         return null;
+    }
+
+    private static boolean isTimeoutMessage(String message) {
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("timed out") || normalized.contains("timeout");
     }
 
     private static String[] parseTestNames(String json) {
@@ -378,6 +417,7 @@ public class Server {
     public static void main(String[] args) throws IOException {
         String socketPathValue = argument(args, "--socket");
         String projectRootValue = argument(args, "--project-root");
+        String timeoutValue = argument(args, "--timeout-ms");
         if (socketPathValue == null || projectRootValue == null) {
             System.err.println("Required arguments: --socket and --project-root");
             System.exit(1);
@@ -385,6 +425,15 @@ public class Server {
 
         Path socketPath = Paths.get(socketPathValue);
         Path projectRoot = Paths.get(projectRootValue).toAbsolutePath().normalize();
+        long timeoutMs = 600_000;
+        try {
+            long configuredTimeout = Long.parseLong(timeoutValue);
+            if (configuredTimeout > 0) {
+                timeoutMs = configuredTimeout;
+            }
+        } catch (NumberFormatException ignored) {
+            // Use the default test timeout when no valid value is supplied.
+        }
         Path socketParent = socketPath.toAbsolutePath().getParent();
         if (socketParent != null) {
             Files.createDirectories(socketParent);
@@ -404,7 +453,7 @@ public class Server {
                     while ((line = reader.readLine()) != null) {
                         try {
                             String[] testNames = parseTestNames(line);
-                            writer.write(serializeResults(runTests(testNames, projectRoot)));
+                            writer.write(serializeResults(runTests(testNames, projectRoot, timeoutMs)));
                         } catch (RuntimeException error) {
                             writer.write(serializeResults(List.of(
                                 new TestResult("<daemon>", false, 0, "", error.toString())

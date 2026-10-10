@@ -1,11 +1,13 @@
 # Sea Pig Configuration File (seapig.yaml or .seapig.yaml)
 
-# Number of concurrent test execution workers, you can specify
-#but this is just if you dont want to write --loop (number)
+# Default number of test loops for `pig` when --loop is omitted
 workers: 10
 
-# Timeout per individual test execution (e.g. 5s, 30s, 1m)
-timeout: 1m
+# Timeout per individual test execution (e.g. 5s, 30s, 1m,1h, etc). This is the maximum time a single test can run before being killed.
+timeout: 10m
+
+# Timeout for discovering tests in large projects
+discovery_timeout: 10m
 
 # Enable verbose internal debugging logs
 debug: false

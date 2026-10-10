@@ -18,6 +18,7 @@ class SeapigCollector:
         self.current_result = {
             "test_name": nodeid,
             "passed": True,
+            "timed_out": False,
             "time_taken": 0,
             "stdout": "",
             "stderr": "",
@@ -33,6 +34,7 @@ class SeapigCollector:
             result = {
                 "test_name": report.nodeid,
                 "passed": True,
+                "timed_out": False,
                 "time_taken": 0,
                 "stdout": "",
                 "stderr": "",
@@ -43,15 +45,38 @@ class SeapigCollector:
         if report.failed:
             result["passed"] = False
             result["stderr"] = str(report.longrepr) if report.longrepr else "Test failed"
+            result["timed_out"] = is_timeout_message(result["stderr"])
 
 
-def run_test_process(test_name, project_root):
-    process = subprocess.run(
-        [sys.executable, os.path.abspath(__file__), "--run-selector", test_name],
-        cwd=project_root,
-        capture_output=True,
-        text=True,
-    )
+def is_timeout_message(message):
+    message = message.lower()
+    return "timed out" in message or "timeout" in message
+
+
+def run_test_process(test_name, project_root, timeout_seconds):
+    try:
+        process = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--run-selector", test_name],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        stdout = error.stdout or ""
+        stderr = error.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode(errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        return [{
+            "test_name": test_name,
+            "passed": False,
+            "timed_out": True,
+            "time_taken": int(timeout_seconds * 1e9),
+            "stdout": stdout,
+            "stderr": f"test timed out after {timeout_seconds}s\n{stderr}",
+        }]
     marker = "SEAPIG_RESULT:"
     for line in reversed(process.stdout.splitlines()):
         if line.startswith(marker):
@@ -71,6 +96,7 @@ def main():
     parser.add_argument("--socket", help="Path to Unix socket")
     parser.add_argument("--project-root", default=os.getcwd())
     parser.add_argument("--run-selector")
+    parser.add_argument("--timeout-ns", type=int, default=600_000_000_000)
     args = parser.parse_args()
 
     if args.run_selector is not None:
@@ -120,7 +146,11 @@ def main():
                                     raise ValueError("request must be a JSON array of test selectors")
                                 response = []
                                 for test_name in test_names:
-                                    response.extend(run_test_process(test_name, args.project_root))
+                                    response.extend(run_test_process(
+                                        test_name,
+                                        args.project_root,
+                                        max(args.timeout_ns / 1e9, 0.001),
+                                    ))
                             except Exception as error:
                                 response = [{
                                     "test_name": "<daemon>",

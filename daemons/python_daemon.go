@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,6 +50,9 @@ func (p *PythonDaemon) Start() error {
 		}
 	}
 	args := []string{p.DaemonPath, "--socket", p.Socketpath}
+	if p.Timeout > 0 {
+		args = append(args, "--timeout-ns", strconv.FormatInt(p.Timeout.Nanoseconds(), 10))
+	}
 	if p.ProjectRoot != "" {
 		args = append(args, "--project-root", p.ProjectRoot)
 	}

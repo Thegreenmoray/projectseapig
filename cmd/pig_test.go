@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Justi/projectseapig/factory"
 	"github.com/Justi/projectseapig/logs"
 	"github.com/Justi/projectseapig/runners"
 	"github.com/spf13/cobra"
@@ -28,21 +29,21 @@ func (m *MockPigRunner) RunTes(t string) (runners.TestResult, error) {
 }
 
 // --- TEST 1: Worker Pipeline Success ---
-func TestSwap(t *testing.T) {
+func TestHeapPopsShortestTestsFirst(t *testing.T) {
 	queue := &IntHeap{}
 	heap.Init(queue)
 	heap.Push(queue, Pair{Time: 5_000_000_000, Testname: "long"})
 	heap.Push(queue, Pair{Time: 3_000_000_000, Testname: "medium"})
 	heap.Push(queue, Pair{Time: 1_000_000_000, Testname: "short"})
 
-	for _, want := range []string{"long", "medium", "short"} {
+	for _, want := range []string{"short", "medium", "long"} {
 		if got := heap.Pop(queue).(Pair).Testname; got != want {
 			t.Fatalf("heap popped %q, want %q", got, want)
 		}
 	}
 }
 
-func TestGreedyScheduleRunsLongestTestsFirst(t *testing.T) {
+func TestGreedyScheduleRunsShortestTestsFirst(t *testing.T) {
 	tests := []string{"short", "long", "medium"}
 	durations := map[string]int64{
 		"short_0":  1_000_000_000,
@@ -52,11 +53,60 @@ func TestGreedyScheduleRunsLongestTestsFirst(t *testing.T) {
 
 	got := greedySchedule(tests, 1, 2, durations)
 	want := [][]string{
-		{"long", "medium"},
-		{"short"},
+		{"short", "medium"},
+		{"long"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("greedySchedule() = %v, want %v", got, want)
+	}
+}
+
+func TestGreedyScheduleIncludesTestsWithoutTimings(t *testing.T) {
+	tests := []string{"unknown", "known"}
+	durations := map[string]int64{"known_0": 100}
+
+	got := greedySchedule(tests, 1, 1, durations)
+	want := [][]string{{"unknown"}, {"known"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("greedySchedule() = %v, want %v", got, want)
+	}
+}
+
+func TestExcludeTimedOutTests(t *testing.T) {
+	tests := []string{"first", "timed-out", "last"}
+	timedOut := map[string]bool{"timed-out": true}
+	want := []string{"first", "last"}
+	if got := excludeTimedOutTests(tests, timedOut); !reflect.DeepEqual(got, want) {
+		t.Fatalf("excludeTimedOutTests() = %v, want %v", got, want)
+	}
+}
+
+func TestTestSelectorForResult(t *testing.T) {
+	tests := []string{"TestFoo", "TestFoo::TestNested"}
+	if got := testSelectorForResult("TestFoo::TestNested::TestCase", tests); got != "TestFoo::TestNested" {
+		t.Fatalf("testSelectorForResult() = %q, want longest matching selector", got)
+	}
+	if got := testSelectorForResult("TestExact", []string{"TestExact"}); got != "TestExact" {
+		t.Fatalf("testSelectorForResult() = %q, want exact selector", got)
+	}
+}
+
+func TestConfiguredLoopCountUsesYamlUnlessFlagIsSet(t *testing.T) {
+	previousConfig := factory.Cfg
+	factory.Cfg.Workers = 7
+	defer func() { factory.Cfg = previousConfig }()
+
+	command := &cobra.Command{}
+	command.Flags().Int("loop", 25, "loop count")
+	if got := configuredLoopCount(command); got != 7 {
+		t.Fatalf("configuredLoopCount() = %d, want config default 7", got)
+	}
+
+	if err := command.Flags().Parse([]string{"--loop=3"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := configuredLoopCount(command); got != 3 {
+		t.Fatalf("configuredLoopCount() with explicit flag = %d, want 3", got)
 	}
 }
 
@@ -142,7 +192,7 @@ func TestRunCmd_Success(t *testing.T) {
 
 // --- TEST 2: Missing Required Lang Flag Error ---
 func TestRunCmd_MissingLangFla(t *testing.T) {
-	localRunCmd := &cobra.Command{Use: "run", Run: runCmd.Run}
+	localRunCmd := &cobra.Command{Use: "run", RunE: runCmd.RunE}
 	var localLang string
 	localRunCmd.Flags().StringVarP(&localLang, "lang", "l", "", "")
 	_ = localRunCmd.MarkFlagRequired("lang")

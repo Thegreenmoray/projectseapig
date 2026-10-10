@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,6 +38,9 @@ func (t *JsDaemon) getDialer() SocketDialer {
 func (t *JsDaemon) Start() error {
 	tsxCLI := filepath.Join(filepath.Dir(t.DaemonPath), "node_modules", "tsx", "dist", "cli.mjs")
 	args := []string{tsxCLI, t.DaemonPath, "--socket", t.Socketpath}
+	if t.Timeout > 0 {
+		args = append(args, "--timeout-ms", strconv.FormatInt(t.Timeout.Milliseconds(), 10))
+	}
 	if t.NodePath != "" {
 		args = append(args, "--project-root", t.NodePath)
 	}

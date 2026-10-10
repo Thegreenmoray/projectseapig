@@ -33,12 +33,18 @@ function hasJestConfig(projectRoot: string): boolean {
 interface TestResult {
     test_name: string;
     passed: boolean;
+    timed_out?: boolean;
     time_taken: number;
     stdout: string;
     stderr: string;
 }
 
-async function runJestTests(testPaths: string[]): Promise<TestResult[]> {
+function isTimeoutMessage(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return normalized.includes('timed out') || normalized.includes('timeout');
+}
+
+async function runJestTests(testPaths: string[], timeoutMs: number): Promise<TestResult[]> {
     const projectRoot = process.cwd();
     const mappedResults: TestResult[] = [];
 
@@ -49,6 +55,7 @@ async function runJestTests(testPaths: string[]): Promise<TestResult[]> {
                 silent: true,
                 reporters: [],
                 watch: false,
+                testTimeout: timeoutMs,
                 _: [testPath]
             };
             if (!hasJestConfig(projectRoot)) {
@@ -67,7 +74,9 @@ async function runJestTests(testPaths: string[]): Promise<TestResult[]> {
                         passed: assertion.status !== 'failed',
                         time_taken: (assertion.duration || 0) * 1e6,
                         stdout: '',
-                        stderr: assertion.failureMessages.join('\n')
+                        stderr: assertion.failureMessages.join('\n'),
+                        timed_out: assertion.status === 'failed'
+                            && isTimeoutMessage(assertion.failureMessages.join('\n'))
                     });
                 }
 
@@ -77,7 +86,8 @@ async function runJestTests(testPaths: string[]): Promise<TestResult[]> {
                         passed: false,
                         time_taken: 0,
                         stdout: '',
-                        stderr: testFile.failureMessage
+                        stderr: testFile.failureMessage,
+                        timed_out: isTimeoutMessage(testFile.failureMessage)
                     });
                 }
             }
@@ -87,7 +97,8 @@ async function runJestTests(testPaths: string[]): Promise<TestResult[]> {
                 passed: false,
                 time_taken: 0,
                 stdout: '',
-                stderr: `Daemon Jest Execution Error: ${err?.message || String(err)}`
+                stderr: `Daemon Jest Execution Error: ${err?.message || String(err)}`,
+                timed_out: isTimeoutMessage(err?.message || String(err))
             });
         }
     }
@@ -104,6 +115,10 @@ function main(): void {
     const socketPath = process.argv[socketIndex + 1];
     const projectRootIndex = process.argv.indexOf('--project-root');
     const projectRoot = projectRootIndex >= 0 ? process.argv[projectRootIndex + 1] : process.cwd();
+    const timeoutIndex = process.argv.indexOf('--timeout-ms');
+    const timeoutMs = timeoutIndex >= 0
+        ? Number(process.argv[timeoutIndex + 1])
+        : 600_000;
     process.chdir(projectRoot);
 
     const useTcp = process.platform === 'win32';
@@ -138,7 +153,7 @@ function main(): void {
                             if (!Array.isArray(testPaths) || !testPaths.every((path) => typeof path === 'string')) {
                                 throw new Error('request must be a JSON array of test paths');
                             }
-                            results = await runJestTests(testPaths);
+                            results = await runJestTests(testPaths, timeoutMs);
                         } catch (error: any) {
                             results = [{
                                 test_name: '<daemon>',

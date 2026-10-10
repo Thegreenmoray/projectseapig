@@ -1,6 +1,7 @@
 package gorunner
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -11,19 +12,21 @@ import (
 )
 
 type Gotester struct {
-	BinPath     string // e.g., "go"
-	ProjectPath string // e.g., "C:\Users\...\testfolder"
-	BaseArgs    []string
-	Timeout     time.Duration
-	Env         []string
+	BinPath           string // e.g., "go"
+	ProjectPath       string // e.g., "C:\Users\...\testfolder"
+	BaseArgs          []string
+	Timeout           time.Duration
+	DiscoveryTimeout  time.Duration
+	DiscoveryProgress func(completed, total int, packagePath string)
+	Env               []string
 }
 
 func (g *Gotester) ListTests(projectPath string) ([]string, error) {
-	discoveryTimeout := g.Timeout
 	if g.Timeout <= 0 {
 		return nil, fmt.Errorf("Time is too short, please enter something larger than 0")
 	}
-	if discoveryTimeout < 2*time.Minute {
+	discoveryTimeout := g.DiscoveryTimeout
+	if discoveryTimeout <= 0 {
 		discoveryTimeout = 2 * time.Minute
 	}
 
@@ -48,19 +51,52 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 	}
 	listPackages := exec.CommandContext(ctx, bin, "list", "./...")
 	listPackages.Dir = projectPath
-	packageOutput, err := listPackages.CombinedOutput()
+	stdout, err := listPackages.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("could not read go list output: %w", err)
+	}
+	var stderr strings.Builder
+	listPackages.Stderr = &stderr
+	if err := listPackages.Start(); err != nil {
+		return nil, fmt.Errorf("could not start go list ./...: %w", err)
+	}
+	var packagePaths []string
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		packagePath := strings.TrimSpace(scanner.Text())
+		if packagePath == "" {
+			continue
+		}
+		packagePaths = append(packagePaths, packagePath)
+		if g.DiscoveryProgress != nil {
+			g.DiscoveryProgress(len(packagePaths), -1, packagePath)
+		}
+	}
+	scanErr := scanner.Err()
+	listErr := listPackages.Wait()
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("Go test discovery timed out after %v: %w, Maybe there's a database/AI agent being called?, or otherwise a process being stalled?", discoveryTimeout, ctx.Err())
 	}
-	if err != nil {
-		if strings.Contains(string(packageOutput), "does not contain main module") || strings.Contains(string(packageOutput), "go.mod file not found") {
+	if scanErr != nil {
+		return nil, fmt.Errorf("failed reading go list ./... output: %w", scanErr)
+	}
+	if listErr != nil {
+		output := strings.TrimSpace(strings.Join(packagePaths, "\n") + "\n" + stderr.String())
+		if strings.Contains(output, "does not contain main module") || strings.Contains(output, "go.mod file not found") {
 			return nil, fmt.Errorf("no Go tests found in %s; Go tests must be func Test... declarations in *_test.go files, so check that --lang matches this project", projectPath)
 		}
-		return nil, fmt.Errorf("go list ./... failed: %w | output: %s", err, strings.TrimSpace(string(packageOutput)))
+		return nil, fmt.Errorf("go list ./... failed: %w | output: %s", listErr, output)
+	}
+
+	if g.DiscoveryProgress != nil {
+		g.DiscoveryProgress(0, len(packagePaths), "")
 	}
 
 	var tests []string
-	for _, packagePath := range strings.Fields(string(packageOutput)) {
+	for index, packagePath := range packagePaths {
+		if g.DiscoveryProgress != nil {
+			g.DiscoveryProgress(index, len(packagePaths), packagePath)
+		}
 		listPackageTests := exec.CommandContext(ctx, bin, "test", "-list", ".*", packagePath)
 		listPackageTests.Dir = projectPath
 		output, err := listPackageTests.CombinedOutput()
@@ -69,6 +105,9 @@ func (g *Gotester) ListTests(projectPath string) ([]string, error) {
 		}
 		if err != nil {
 			return nil, fmt.Errorf("go test -list failed for %s: %w | output: %s", packagePath, err, strings.TrimSpace(string(output)))
+		}
+		if g.DiscoveryProgress != nil {
+			g.DiscoveryProgress(index+1, len(packagePaths), packagePath)
 		}
 		for _, line := range strings.Split(string(output), "\n") {
 			line = strings.TrimSpace(line)

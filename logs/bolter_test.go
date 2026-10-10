@@ -79,10 +79,13 @@ func TestBoltRepo_SavePigtime_And_Extractpigtime(t *testing.T) {
 	repo := setupTestRepo(t)
 	defer repo.Close()
 
-	// 1. Test Extractpigtime before bucket exists (Error path)
-	_, err := repo.Extractpigtime()
-	if err == nil {
-		t.Error("Expected error when extracting from non-existent TestTime bucket, got nil")
+	// A fresh database has no timing history yet.
+	timesMap, err := repo.Extractpigtime()
+	if err != nil {
+		t.Fatalf("Extractpigtime() on a fresh database failed: %v", err)
+	}
+	if len(timesMap) != 0 {
+		t.Fatalf("Extractpigtime() on a fresh database = %v, want empty history", timesMap)
 	}
 
 	pig := &runners.Pig{
@@ -99,7 +102,7 @@ func TestBoltRepo_SavePigtime_And_Extractpigtime(t *testing.T) {
 	}
 
 	// 3. Test Extractpigtime success path
-	timesMap, err := repo.Extractpigtime()
+	timesMap, err = repo.Extractpigtime()
 	if err != nil {
 		t.Fatalf("Extractpigtime() failed unexpectedly: %v", err)
 	}
@@ -113,5 +116,25 @@ func TestBoltRepo_SavePigtime_And_Extractpigtime(t *testing.T) {
 
 	if val, ok := timesMap[expectedKey1]; !ok || val != (50*time.Millisecond).Nanoseconds() {
 		t.Errorf("Expected %d ns for key %s, got %d", (50 * time.Millisecond).Nanoseconds(), expectedKey1, val)
+	}
+}
+
+func TestBoltRepo_SaveAndExtractTimedOutTests(t *testing.T) {
+	repo := setupTestRepo(t)
+	defer repo.Close()
+
+	got, err := repo.ExtractTimedOutTests()
+	if err != nil || len(got) != 0 {
+		t.Fatalf("ExtractTimedOutTests() on empty repo = %v, %v; want empty map and no error", got, err)
+	}
+	if err := repo.SaveTimedOutTest("TestStalls"); err != nil {
+		t.Fatalf("SaveTimedOutTest() error = %v", err)
+	}
+	got, err = repo.ExtractTimedOutTests()
+	if err != nil {
+		t.Fatalf("ExtractTimedOutTests() error = %v", err)
+	}
+	if !got["TestStalls"] || len(got) != 1 {
+		t.Fatalf("ExtractTimedOutTests() = %v, want TestStalls excluded", got)
 	}
 }

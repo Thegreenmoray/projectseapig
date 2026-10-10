@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -320,6 +321,7 @@ func (j *JavaDaemon) Start() error {
 		"-jar", j.DaemonPath,
 		"--socket", j.Socketpath,
 		"--project-root", j.ProjectRoot,
+		"--timeout-ms", strconv.FormatInt(j.Timeout.Milliseconds(), 10),
 	}
 
 	executor := j.getExecutor()

@@ -100,3 +100,50 @@ func TestSampleTwo(t *testing.T) {}
 		})
 	}
 }
+
+func TestGotester_ListTestsReportsPackageProgress(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module example.com/progress\n\ngo 1.21\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rootTest := "package progress\nimport \"testing\"\nfunc TestRoot(t *testing.T) {}\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "root_test.go"), []byte(rootTest), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	subpackageDir := filepath.Join(projectDir, "subpackage")
+	if err := os.MkdirAll(subpackageDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	subpackageTest := "package subpackage\nimport \"testing\"\nfunc TestSubpackage(t *testing.T) {}\n"
+	if err := os.WriteFile(filepath.Join(subpackageDir, "subpackage_test.go"), []byte(subpackageTest), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	lastCompleted, lastTotal := 0, 0
+	seenPackage := make(map[string]bool)
+	tester := Gotester{
+		BinPath:          "go",
+		Timeout:          time.Minute,
+		DiscoveryTimeout: time.Minute,
+		DiscoveryProgress: func(completed, total int, packagePath string) {
+			lastCompleted, lastTotal = completed, total
+			if packagePath != "" {
+				seenPackage[packagePath] = true
+			}
+		},
+	}
+	tests, err := tester.ListTests(projectDir)
+	if err != nil {
+		t.Fatalf("ListTests() error = %v", err)
+	}
+	if len(tests) != 2 {
+		t.Fatalf("ListTests() found %d tests, want 2: %v", len(tests), tests)
+	}
+	if lastTotal != 2 || lastCompleted != lastTotal {
+		t.Fatalf("final discovery progress = %d/%d, want 2/2", lastCompleted, lastTotal)
+	}
+	if len(seenPackage) != 2 {
+		t.Fatalf("reported %d packages, want both discovered packages: %v", len(seenPackage), seenPackage)
+	}
+}

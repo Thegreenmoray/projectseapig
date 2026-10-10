@@ -3,6 +3,7 @@ package factory
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/runners"
@@ -172,6 +173,35 @@ func TestKotlinAndTypeScriptDispatch(t *testing.T) {
 				t.Fatalf("unexpected test runner for %s: %#v", test.language, testRunner)
 			}
 		})
+	}
+}
+
+func TestDaemonsUseConfiguredTestTimeout(t *testing.T) {
+	previousConfig := Cfg
+	Cfg.Timeout = "23s"
+	defer func() { Cfg = previousConfig }()
+
+	for _, language := range []string{"go", "java", "kotlin", "python", "js", "ts"} {
+		executor, err := Daemontype(language, ".")
+		if err != nil {
+			t.Fatalf("Daemontype(%q) error = %v", language, err)
+		}
+		var got time.Duration
+		switch daemon := executor.(type) {
+		case *daemons.GoCompiler:
+			got = daemon.Timeout
+		case *daemons.JavaDaemon:
+			got = daemon.Timeout
+		case *daemons.PythonDaemon:
+			got = daemon.Timeout
+		case *daemons.JsDaemon:
+			got = daemon.Timeout
+		default:
+			t.Fatalf("Daemontype(%q) returned unexpected type %T", language, executor)
+		}
+		if got != 23*time.Second {
+			t.Errorf("Daemontype(%q) timeout = %v, want %v", language, got, 23*time.Second)
+		}
 	}
 }
 

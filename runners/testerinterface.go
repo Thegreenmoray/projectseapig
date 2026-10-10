@@ -20,6 +20,7 @@ type Pig struct {
 type TestResult struct {
 	Testname  string            `json:"test_name"`
 	Passed    bool              `json:"passed"`
+	TimedOut  bool              `json:"timed_out,omitempty"`
 	Timetaken time.Duration     `json:"time_taken"`
 	Timestamp time.Time         `json:"timestamp"`
 	Exitcode  int               `json:"exit_code"`

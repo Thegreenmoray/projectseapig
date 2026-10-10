@@ -46,6 +46,7 @@ func newDaemonSocketPath() (string, error) {
 
 func Daemontype(lang string, projectPath string) (daemons.TestExecutor, error) {
 	normalizedLang := strings.ToLower(lang)
+	timeout := configuredTestTimeout()
 	if normalizedLang == "go" {
 		binName := "seapig_test_runner"
 		if runtime.GOOS == "windows" {
@@ -54,6 +55,7 @@ func Daemontype(lang string, projectPath string) (daemons.TestExecutor, error) {
 		return &daemons.GoCompiler{
 			ProjectPath:  projectPath,
 			CompiledPath: filepath.Join(projectPath, "bin", binName),
+			Timeout:      timeout,
 		}, nil
 	}
 
@@ -73,6 +75,7 @@ func Daemontype(lang string, projectPath string) (daemons.TestExecutor, error) {
 			ProjectRoot: projectRoot,
 			DaemonPath:  seapigServerPath("build", "libs", "seapig-server-1.0-SNAPSHOT.jar"),
 			IsKotlin:    normalizedLang == "kotlin",
+			Timeout:     timeout,
 			DaemonBase:  daemons.DaemonBase{Socketpath: socketPath},
 		}, nil
 
@@ -81,6 +84,7 @@ func Daemontype(lang string, projectPath string) (daemons.TestExecutor, error) {
 			NodePath:   projectRoot,
 			DaemonPath: seapigServerPath("server.ts"),
 			IsTS:       normalizedLang == "ts",
+			Timeout:    timeout,
 			DaemonBase: daemons.DaemonBase{Socketpath: socketPath},
 		}, nil
 
@@ -88,6 +92,7 @@ func Daemontype(lang string, projectPath string) (daemons.TestExecutor, error) {
 		return &daemons.PythonDaemon{
 			ProjectRoot: projectRoot,
 			DaemonPath:  seapigServerPath("server.py"),
+			Timeout:     timeout,
 			DaemonBase:  daemons.DaemonBase{Socketpath: socketPath},
 		}, nil
 
@@ -97,9 +102,10 @@ func Daemontype(lang string, projectPath string) (daemons.TestExecutor, error) {
 }
 
 func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
-	timeout, err := time.ParseDuration(Cfg.Timeout)
-	if err != nil || timeout <= 0 {
-		timeout = 10 * time.Second
+	timeout := configuredTestTimeout()
+	discoveryTimeout, err := time.ParseDuration(Cfg.DiscoveryTimeout)
+	if err != nil || discoveryTimeout <= 0 {
+		discoveryTimeout = 5 * time.Minute
 	}
 
 	switch strings.ToLower(lang) {
@@ -135,9 +141,10 @@ func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 		}, nil
 	case "go":
 		return &gorunner.Gotester{
-			BinPath:  "go",
-			BaseArgs: []string{"test"},
-			Timeout:  timeout,
+			BinPath:          "go",
+			BaseArgs:         []string{"test"},
+			Timeout:          timeout,
+			DiscoveryTimeout: discoveryTimeout,
 		}, nil
 	case "python":
 		// Using pytest as the default execution tool
@@ -149,4 +156,12 @@ func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 	default:
 		return nil, errors.New("Lang not supported...")
 	}
+}
+
+func configuredTestTimeout() time.Duration {
+	timeout, err := time.ParseDuration(Cfg.Timeout)
+	if err != nil || timeout <= 0 {
+		return 10 * time.Second
+	}
+	return timeout
 }

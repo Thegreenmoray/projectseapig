@@ -2,6 +2,8 @@ package daemons
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -25,6 +27,13 @@ type RealCommandRunner struct{}
 
 func (r *RealCommandRunner) Run(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
+}
+
+func (r *RealCommandRunner) RunWithTimeout(timeout time.Duration, name string, args ...string) ([]byte, error, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return output, err, errors.Is(ctx.Err(), context.DeadlineExceeded)
 }
 
 // Thankfully this wasnt too complex, so using llms wasnt too detrimental to the learning process.
@@ -98,8 +107,18 @@ func (gc *GoCompiler) RunTests(batchoftests []string) ([]runners.TestResult, err
 		}
 		pattern := "^" + regexp.QuoteMeta(testName) + "$"
 		start := time.Now()
-		output, runErr := gc.getRunner().Run(compiledPath, "-test.v", "-test.run", pattern)
+		var output []byte
+		var runErr error
+		timedOut := false
+		if timeoutRunner, ok := gc.getRunner().(interface {
+			RunWithTimeout(time.Duration, string, ...string) ([]byte, error, bool)
+		}); ok && gc.Timeout > 0 {
+			output, runErr, timedOut = timeoutRunner.RunWithTimeout(gc.Timeout, compiledPath, "-test.v", "-test.run", pattern)
+		} else {
+			output, runErr = gc.getRunner().Run(compiledPath, "-test.v", "-test.run", pattern)
+		}
 		passed, reported := goTestResult(output, testName)
+		timedOut = timedOut || goTestTimedOut(output)
 		if runErr != nil {
 			passed = false
 		}
@@ -107,6 +126,7 @@ func (gc *GoCompiler) RunTests(batchoftests []string) ([]runners.TestResult, err
 		result := runners.TestResult{
 			Testname:  selector,
 			Passed:    passed,
+			TimedOut:  timedOut,
 			Timetaken: time.Since(start),
 			Stdout:    string(output),
 		}
@@ -120,6 +140,11 @@ func (gc *GoCompiler) RunTests(batchoftests []string) ([]runners.TestResult, err
 	}
 
 	return results, nil
+}
+
+func goTestTimedOut(output []byte) bool {
+	message := strings.ToLower(string(output))
+	return strings.Contains(message, "test timed out after") || strings.Contains(message, "panic: test timed out")
 }
 
 func splitGoTestSelector(selector string) (string, string) {

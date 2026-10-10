@@ -82,13 +82,41 @@ func (r *BoltRepo) SavePigtime(testName string, pig *runners.Pig) error {
 	})
 }
 
+func (r *BoltRepo) SaveTimedOutTest(testName string) error {
+	return r.db.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte("TimedOutTests"))
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(testName), []byte{1})
+	})
+}
+
+func (r *BoltRepo) ExtractTimedOutTests() (map[string]bool, error) {
+	timedOut := make(map[string]bool)
+	err := r.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("TimedOutTests"))
+		if bucket == nil {
+			return nil
+		}
+		return bucket.ForEach(func(key, _ []byte) error {
+			timedOut[string(key)] = true
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return timedOut, nil
+}
+
 func (r *BoltRepo) Extractpigtime() (map[string]int64, error) {
 	results := make(map[string]int64)
 
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte("TestTime"))
 		if b == nil {
-			return fmt.Errorf("TestTime does not exist")
+			return nil
 		}
 
 		c := b.Cursor()
