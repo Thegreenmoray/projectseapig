@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,7 +14,6 @@ import (
 	"github.com/Justi/projectseapig/factory"
 	"github.com/Justi/projectseapig/logs"
 	"github.com/Justi/projectseapig/runners"
-	"github.com/Justi/projectseapig/runners/gorunner"
 	"github.com/rs/zerolog/log"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
@@ -26,7 +26,11 @@ var runCmd = &cobra.Command{
 	Short: "Execute SeaPig on unit tests once on selected language",
 	Long: `SeaPig does one round of unit test checking given a valid language,
 a less costly run, just to be certain that it isn't just tests failing and ensuring 
-that SeaPig is configured correctly.`,
+that SeaPig is configured correctly.
+
+Test discovery displays a live progress indicator, the number of tests found,
+the current file or discovery phase, and elapsed time.`,
+	Example: "projectseapig run --lang python",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pig, err := factory.Testtype(lang, ".")
 		if err != nil {
@@ -40,11 +44,11 @@ that SeaPig is configured correctly.`,
 		fmt.Printf("Sending in a pig into the %s trench....\n", lang)
 
 		names, err := listTestsWithProgress(func(progress func(completed, total int, packagePath string)) ([]string, error) {
-			if goRunner, ok := pig.(*gorunner.Gotester); ok {
-				goRunner.DiscoveryProgress = progress
+			if reporter, ok := pig.(runners.DiscoveryProgressReporter); ok {
+				reporter.SetDiscoveryProgress(progress)
 			}
 			return pig.ListTests(".")
-		})
+		}, lang)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to discover tests")
 			log.Info().Msg("Overall Summary: FAIL")
@@ -99,10 +103,12 @@ that SeaPig is configured correctly.`,
 		}()
 
 		anyFailed := false
-		resultCount := 0
+		completedTests := make(map[string]struct{}, len(names))
 		for result := range results {
-			resultCount++
 			_ = bar.Add(1)
+			if selector, ok := matchingTestSelector(result.Testname, names); ok {
+				completedTests[selector] = struct{}{}
+			}
 			//log.Info().Msgf("--- Test Name: %s ---", result.Testname)
 			//log.Info().Msgf("Passed: %t", result.Passed)
 			//log.Info().Msgf("Output:\n%s", result.Stdout)
@@ -129,11 +135,18 @@ that SeaPig is configured correctly.`,
 			}
 		}
 
+		// Some frameworks return one result per assertion or test method, not per discovery selector.
+		missingTestCount := 0
+		for _, name := range names {
+			if _, completed := completedTests[name]; !completed {
+				missingTestCount++
+			}
+		}
 		// 6. Evaluate final status after ALL tests have run
-		if anyFailed || resultCount != len(names) {
+		if anyFailed || missingTestCount > 0 {
 			log.Info().Msg("Overall Summary: FAIL")
-			if resultCount != len(names) {
-				return fmt.Errorf("test runner returned %d results for %d discovered tests", resultCount, len(names))
+			if missingTestCount > 0 {
+				return fmt.Errorf("test runner returned results for %d of %d discovered tests", len(names)-missingTestCount, len(names))
 			}
 			return errors.New("one or more tests failed")
 		}
@@ -151,7 +164,7 @@ func isTimedOutResult(result runners.TestResult) bool {
 	return strings.Contains(message, "timed out") || strings.Contains(message, "timeout")
 }
 
-func testSelectorForResult(resultName string, selectors []string) string {
+func matchingTestSelector(resultName string, selectors []string) (string, bool) {
 	matched := ""
 	for _, selector := range selectors {
 		if (resultName == selector || strings.HasPrefix(resultName, selector+"::")) && len(selector) > len(matched) {
@@ -159,43 +172,137 @@ func testSelectorForResult(resultName string, selectors []string) string {
 		}
 	}
 	if matched != "" {
+		return matched, true
+	}
+	return "", false
+}
+
+func testSelectorForResult(resultName string, selectors []string) string {
+	if matched, ok := matchingTestSelector(resultName, selectors); ok {
 		return matched
 	}
 	return resultName
 }
 
-func listTestsWithProgress(listTests func(func(completed, total int, packagePath string)) ([]string, error)) ([]string, error) {
-	_, _ = fmt.Fprint(os.Stdout, "\r[seapig] Discovering Go packages: 0 found")
-	reportProgress := func(completed, total int, packagePath string) {
-		if total < 0 {
-			_, _ = fmt.Fprintf(os.Stdout, "\r[seapig] Discovering Go packages: %d found", completed)
-		} else {
-			renderPackageProgress(os.Stdout, completed, total)
+func listTestsWithProgress(listTests func(func(completed, total int, packagePath string)) ([]string, error), language string) ([]string, error) {
+	discoveryLabel := testDiscoveryLabel(language)
+	startedAt := time.Now()
+	progress := discoveryProgress{
+		completed: 0,
+		total:     -1,
+		item:      discoveryWaitMessage(language),
+	}
+	var progressMu sync.Mutex
+	stopRenderer := make(chan struct{})
+	rendererStopped := make(chan struct{})
+
+	go func() {
+		defer close(rendererStopped)
+		ticker := time.NewTicker(120 * time.Millisecond)
+		defer ticker.Stop()
+		frame := 0
+		for {
+			select {
+			case <-ticker.C:
+				progressMu.Lock()
+				renderDiscoveryProgress(os.Stdout, progress, discoveryLabel, time.Since(startedAt), frame)
+				progressMu.Unlock()
+				frame++
+			case <-stopRenderer:
+				return
+			}
 		}
+	}()
+
+	reportProgress := func(completed, total int, packagePath string) {
+		progressMu.Lock()
+		progress.completed = completed
+		progress.total = total
+		if packagePath != "" {
+			progress.item = packagePath
+		}
+		progressMu.Unlock()
 	}
 
 	names, err := listTests(reportProgress)
-	_, _ = fmt.Fprintln(os.Stdout)
+	close(stopRenderer)
+	<-rendererStopped
+	if err == nil {
+		_, _ = fmt.Fprintf(os.Stdout, "\r\033[K[seapig] Discovery complete: %d %s test targets in %s\n", len(names), strings.ToLower(discoveryLabel), time.Since(startedAt).Round(time.Second))
+	} else {
+		_, _ = fmt.Fprintf(os.Stdout, "\r\033[K[seapig] Discovery failed for %s after %s\n", discoveryLabel, time.Since(startedAt).Round(time.Second))
+	}
 	return names, err
 }
 
-func renderPackageProgress(writer io.Writer, completed, total int) {
+type discoveryProgress struct {
+	completed int
+	total     int
+	item      string
+}
+
+func testDiscoveryLabel(language string) string {
+	switch strings.ToLower(language) {
+	case "go":
+		return "Go packages"
+	case "java":
+		return "Java tests"
+	case "kotlin":
+		return "Kotlin tests"
+	case "js":
+		return "JavaScript tests"
+	case "ts":
+		return "TypeScript tests"
+	case "python":
+		return "Python tests"
+	default:
+		return language + " tests"
+	}
+}
+
+func discoveryWaitMessage(language string) string {
+	switch strings.ToLower(language) {
+	case "java", "kotlin":
+		return "walking test source files"
+	case "js", "ts":
+		return "waiting for Jest to list test files"
+	case "python":
+		return "waiting for pytest collection"
+	default:
+		return "starting test discovery"
+	}
+}
+
+func renderDiscoveryProgress(writer io.Writer, progress discoveryProgress, discoveryLabel string, elapsed time.Duration, frame int) {
 	const width = 20
-	if total < 0 {
-		total = 0
+	item := progress.item
+	if len([]rune(item)) > 60 {
+		runes := []rune(item)
+		item = "..." + string(runes[len(runes)-57:])
 	}
-	if completed < 0 {
-		completed = 0
+	if progress.total < 0 {
+		const indicatorWidth = 4
+		position := frame % (width - indicatorWidth + 1)
+		bar := strings.Repeat("-", position) + strings.Repeat("=", indicatorWidth) + strings.Repeat("-", width-position-indicatorWidth)
+		_, _ = fmt.Fprintf(writer, "\r\033[K[seapig] Scanning %s: [%s] %d test targets found so far | %s | %s", discoveryLabel, bar, progress.completed, item, elapsed.Round(time.Second))
+		return
 	}
-	if completed > total {
-		completed = total
+	if progress.completed < 0 {
+		progress.completed = 0
+	}
+	if progress.completed > progress.total {
+		progress.completed = progress.total
 	}
 	filled := 0
-	if total > 0 {
-		filled = completed * width / total
+	if progress.total > 0 {
+		filled = progress.completed * width / progress.total
 	}
 	bar := "[" + strings.Repeat("=", filled) + strings.Repeat("-", width-filled) + "]"
-	_, _ = fmt.Fprintf(writer, "\r[seapig] Scanning Go packages: %s %d/%d", bar, completed, total)
+	item = filepath.Base(item)
+	if item == "." {
+		item = "preparing package scan"
+	}
+	_, _ = fmt.Fprintf(writer, "\r\033[K[seapig] Scanning %s: %s %d/%d | %s | %s", discoveryLabel, bar, progress.completed, progress.total, item, elapsed.Round(time.Second))
 }
 
 // boot up the deamon/compiled lang were looking for here
@@ -238,6 +345,6 @@ func worker(pig daemons.TestExecutor, jobs <-chan string, results chan<- runners
 
 func init() {
 	rootCmd.AddCommand(runCmd)
-	runCmd.Flags().StringVarP(&lang, "lang", "l", "", "Language to run tests for (go, python, java, js)")
+	runCmd.Flags().StringVarP(&lang, "lang", "l", "", "Language to run tests for (go, java, kotlin, js, ts, python)")
 	runCmd.MarkFlagRequired("lang")
 }

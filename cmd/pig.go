@@ -325,7 +325,7 @@ func init() {
 	rootCmd.AddCommand(pigCmd)
 	//25 in 1.0 release but 10 for testing
 	pigCmd.Flags().IntVarP(&n, "loop", "c", 25, "How many times you want to test")
-	pigCmd.Flags().StringVarP(&l, "lang", "a", "", "Language to run tests for (go, python, java, js, other)")
+	pigCmd.Flags().StringVarP(&l, "lang", "a", "", "Language to run tests for (go, java, kotlin, js, ts, python)")
 	pigCmd.MarkFlagRequired("lang")
 	pigCmd.Flags().BoolVarP(&deep, "deep", "d", false, "Run deep flake detection (100 loops)")
 }

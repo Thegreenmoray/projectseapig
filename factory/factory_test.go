@@ -7,8 +7,10 @@ import (
 
 	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/runners"
+	"github.com/Justi/projectseapig/runners/gorunner"
 	"github.com/Justi/projectseapig/runners/javarunner"
 	"github.com/Justi/projectseapig/runners/jsrunner"
+	"github.com/Justi/projectseapig/runners/pythonrunner"
 )
 
 func TestDaemon(t *testing.T) {
@@ -171,6 +173,101 @@ func TestKotlinAndTypeScriptDispatch(t *testing.T) {
 			}
 			if !test.runner(testRunner) {
 				t.Fatalf("unexpected test runner for %s: %#v", test.language, testRunner)
+			}
+		})
+	}
+}
+
+func TestFactoryDispatchesAllSupportedLanguages(t *testing.T) {
+	tests := []struct {
+		language string
+		check    func(daemons.TestExecutor) bool
+		runner   func(runners.TestRunner) bool
+	}{
+		{
+			language: "go",
+			check: func(executor daemons.TestExecutor) bool {
+				_, ok := executor.(*daemons.GoCompiler)
+				return ok
+			},
+			runner: func(testRunner runners.TestRunner) bool {
+				_, ok := testRunner.(*gorunner.Gotester)
+				return ok
+			},
+		},
+		{
+			language: "java",
+			check: func(executor daemons.TestExecutor) bool {
+				daemon, ok := executor.(*daemons.JavaDaemon)
+				return ok && !daemon.IsKotlin
+			},
+			runner: func(testRunner runners.TestRunner) bool {
+				_, ok := testRunner.(*javarunner.Javatester)
+				return ok
+			},
+		},
+		{
+			language: "kotlin",
+			check: func(executor daemons.TestExecutor) bool {
+				daemon, ok := executor.(*daemons.JavaDaemon)
+				return ok && daemon.IsKotlin
+			},
+			runner: func(testRunner runners.TestRunner) bool {
+				_, ok := testRunner.(*javarunner.Javatester)
+				return ok
+			},
+		},
+		{
+			language: "js",
+			check: func(executor daemons.TestExecutor) bool {
+				daemon, ok := executor.(*daemons.JsDaemon)
+				return ok && !daemon.IsTS
+			},
+			runner: func(testRunner runners.TestRunner) bool {
+				_, ok := testRunner.(*jsrunner.JStester)
+				return ok
+			},
+		},
+		{
+			language: "ts",
+			check: func(executor daemons.TestExecutor) bool {
+				daemon, ok := executor.(*daemons.JsDaemon)
+				return ok && daemon.IsTS
+			},
+			runner: func(testRunner runners.TestRunner) bool {
+				_, ok := testRunner.(*jsrunner.JStester)
+				return ok
+			},
+		},
+		{
+			language: "python",
+			check: func(executor daemons.TestExecutor) bool {
+				_, ok := executor.(*daemons.PythonDaemon)
+				return ok
+			},
+			runner: func(testRunner runners.TestRunner) bool {
+				_, ok := testRunner.(*pythonrunner.Pythontester)
+				return ok
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.language, func(t *testing.T) {
+			executor, err := Daemontype(test.language, ".")
+			if err != nil {
+				t.Fatalf("Daemontype(%q) error = %v", test.language, err)
+			}
+			if !test.check(executor) {
+				t.Errorf("Daemontype(%q) returned unexpected type %T", test.language, executor)
+			}
+
+			testRunner, err := Testtype(test.language, ".")
+			if err != nil {
+				t.Fatalf("Testtype(%q) error = %v", test.language, err)
+			}
+			if !test.runner(testRunner) {
+				t.Errorf("Testtype(%q) returned unexpected type %T", test.language, testRunner)
 			}
 		})
 	}

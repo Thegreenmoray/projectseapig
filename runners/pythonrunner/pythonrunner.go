@@ -1,6 +1,8 @@
 package pythonrunner
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,14 +11,21 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Justi/projectseapig/runners"
 )
 
 type Pythontester struct {
-	ProjectPath string // Target workspace path (e.g., "C:\Users\...\Testsinpython")
-	BinPath     string // e.g., "pytest" or path to virtualenv pytest
-	BaseArgs    []string
-	Timeout     time.Duration
-	Env         []string
+	ProjectPath       string // Target workspace path (e.g., "C:\Users\...\Testsinpython")
+	BinPath           string // e.g., "pytest" or path to virtualenv pytest
+	BaseArgs          []string
+	Timeout           time.Duration
+	Env               []string
+	DiscoveryProgress runners.DiscoveryProgress
+}
+
+func (g *Pythontester) SetDiscoveryProgress(progress runners.DiscoveryProgress) {
+	g.DiscoveryProgress = progress
 }
 
 func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
@@ -68,25 +77,49 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 		cmd.Env = g.Env
 	}
 
-	out, err := cmd.CombinedOutput()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil, fmt.Errorf("python test discovery failed: could not read command output: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		out := stderr.String()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("test discovery timed out after %v. A Python test file may be executing heavy code or network calls at module import time instead of inside a fixture", g.Timeout)
+		}
+		return nil, fmt.Errorf("python test discovery failed: %v | output: %s", err, out)
+	}
+
+	var output strings.Builder
+	var tests []string
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		output.WriteString(line)
+		output.WriteByte('\n')
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.Contains(line, "no tests ran") && strings.Contains(line, "::") {
+			tests = append(tests, line)
+			if g.DiscoveryProgress != nil {
+				g.DiscoveryProgress(len(tests), -1, line)
+			}
+		}
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	combinedOutput := output.String() + stderr.String()
+	if waitErr != nil {
 		// 1. Check specifically for context timeout
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("test discovery timed out after %v. A Python test file may be executing heavy code or network calls at module import time instead of inside a fixture", g.Timeout)
 		}
 
 		// 2. Fall back to standard command failure (syntax error, missing pytest, etc.)
-		return nil, fmt.Errorf("python test discovery failed: %v | output: %s", err, string(out))
+		return nil, fmt.Errorf("python test discovery failed: %v | output: %s", waitErr, combinedOutput)
 	}
-
-	lines := strings.Split(string(out), "\n")
-	var tests []string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.Contains(line, "no tests ran") && strings.Contains(line, "::") {
-			tests = append(tests, line)
-		}
+	if scanErr != nil {
+		return nil, fmt.Errorf("python test discovery failed: could not read command output: %w | output: %s", scanErr, combinedOutput)
 	}
 
 	return tests, nil

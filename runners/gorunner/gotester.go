@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Justi/projectseapig/runners"
 )
 
 type Gotester struct {
@@ -17,8 +19,12 @@ type Gotester struct {
 	BaseArgs          []string
 	Timeout           time.Duration
 	DiscoveryTimeout  time.Duration
-	DiscoveryProgress func(completed, total int, packagePath string)
+	DiscoveryProgress runners.DiscoveryProgress
 	Env               []string
+}
+
+func (g *Gotester) SetDiscoveryProgress(progress runners.DiscoveryProgress) {
+	g.DiscoveryProgress = progress
 }
 
 func (g *Gotester) ListTests(projectPath string) ([]string, error) {

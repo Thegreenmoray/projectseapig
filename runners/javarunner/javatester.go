@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Justi/projectseapig/runners"
 )
 
 var (
@@ -16,11 +18,16 @@ var (
 )
 
 type Javatester struct {
-	BinPath     string   // e.g., "mvn" or "gradlew"
-	BaseArgs    []string // e.g., []string{"test"}
-	Timeout     time.Duration
-	Env         []string
-	ProjectPath string // Added to ensure cmd.Dir points to the right spot
+	BinPath           string   // e.g., "mvn" or "gradlew"
+	BaseArgs          []string // e.g., []string{"test"}
+	Timeout           time.Duration
+	Env               []string
+	ProjectPath       string // Added to ensure cmd.Dir points to the right spot
+	DiscoveryProgress runners.DiscoveryProgress
+}
+
+func (g *Javatester) SetDiscoveryProgress(progress runners.DiscoveryProgress) {
+	g.DiscoveryProgress = progress
 }
 
 func (g *Javatester) ListTests(projectPath string) ([]string, error) {
@@ -68,6 +75,10 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 				return err
 			}
 
+			if g.DiscoveryProgress != nil {
+				g.DiscoveryProgress(len(tests), -1, path)
+			}
+
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("test discovery timed out after %v while scanning file tree", g.Timeout)
@@ -105,6 +116,9 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 						className = strings.ReplaceAll(relativeDir, string(os.PathSeparator), ".") + "." + className
 					}
 					tests = append(tests, className)
+				}
+				if g.DiscoveryProgress != nil {
+					g.DiscoveryProgress(len(tests), -1, path)
 				}
 			}
 			return nil

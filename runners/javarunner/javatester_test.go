@@ -20,6 +20,15 @@ func TestJavaListTests(t *testing.T) {
 	tester := Javatester{
 		Timeout: 60 * time.Second,
 	}
+	sawTestFileProgress := false
+	tester.SetDiscoveryProgress(func(completed, total int, item string) {
+		if total != -1 || item == "" {
+			t.Errorf("unexpected discovery progress: total=%d item=%q", total, item)
+		}
+		if completed == 1 && filepath.Base(item) == "MathTest.java" {
+			sawTestFileProgress = true
+		}
+	})
 	tests, err := tester.ListTests(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -27,6 +36,9 @@ func TestJavaListTests(t *testing.T) {
 
 	if len(tests) != 1 || tests[0] != "MathTest" {
 		t.Errorf("Expected MathTest, got %v", tests)
+	}
+	if !sawTestFileProgress {
+		t.Error("discovery progress did not report the discovered Java test file")
 	}
 }
 

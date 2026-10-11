@@ -37,6 +37,13 @@ func TestJSTesterListTests(t *testing.T) {
 		BaseArgs: []string{"jest", "--config", jestConfig, "--listTests"},
 		Timeout:  60 * time.Second,
 	}
+	var progress []string
+	tester.SetDiscoveryProgress(func(completed, total int, item string) {
+		progress = append(progress, item)
+		if completed != len(progress) || total != -1 {
+			t.Errorf("unexpected discovery progress: completed=%d total=%d", completed, total)
+		}
+	})
 
 	tests, err := tester.ListTests(dir)
 	if err != nil {
@@ -57,5 +64,8 @@ func TestJSTesterListTests(t *testing.T) {
 
 	if len(localTests) != 2 {
 		t.Errorf("Expected 2 tests in temp dir, got %d (All discovered: %v)", len(localTests), tests)
+	}
+	if len(progress) != len(tests) {
+		t.Errorf("discovery progress reported %d tests, want %d", len(progress), len(tests))
 	}
 }

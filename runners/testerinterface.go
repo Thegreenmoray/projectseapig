@@ -6,6 +6,12 @@ type TestRunner interface {
 	ListTests(projectPath string) ([]string, error)
 }
 
+type DiscoveryProgress func(completed, total int, item string)
+
+type DiscoveryProgressReporter interface {
+	SetDiscoveryProgress(DiscoveryProgress)
+}
+
 type Pig struct {
 	Run           []TestResult //would love to call this marine snow, but would be too confusing
 	Flakynessrate float64
