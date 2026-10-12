@@ -20,6 +20,13 @@ import (
 // just go for now, will be updated later
 
 func seapigServerPath(parts ...string) string {
+	if executablePath, err := os.Executable(); err == nil {
+		executableServerDir := filepath.Join(filepath.Dir(executablePath), "servers")
+		if info, err := os.Stat(executableServerDir); err == nil && info.IsDir() {
+			return filepath.Join(append([]string{executableServerDir}, parts...)...)
+		}
+	}
+
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return filepath.Join(append([]string{"servers"}, parts...)...)

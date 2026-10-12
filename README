@@ -121,13 +121,19 @@ https://www.youtube.com/watch?v=Tv9dF2q3now&t=40s
 
 ## 📥 Installation
 
-1. Go to the [Latest Releases](https://github.com/Thegreenmoray/seapig/releases/latest) page.
-2. Download the binary matching your operating system:
-   * **Windows:** `seapig-windows-amd64.exe`
-   * **macOS (Apple Silicon M1/M2/M3):** `seapig-darwin-arm64`
-   * **macOS (Intel):** `seapig-darwin-amd64`
-   * **Linux:** `seapig-linux-amd64`
-3. *(Linux/macOS only)* Make the file executable:
+1. Download and extract the platform package from the [Latest Releases](https://github.com/Thegreenmoray/seapig/releases/latest) page:
+   * **Windows:** `seapig-windows-amd64.zip` (contains `seapig-windows-amd64.exe`)
+   * **macOS (Apple Silicon M1/M2/M3):** `seapig-darwin-arm64.tar.gz`
+   * **macOS (Intel):** `seapig-darwin-amd64.tar.gz`
+   * **Linux:** `seapig-linux-amd64.tar.gz`
+2. Run the executable from the extracted directory. On Windows, use PowerShell:
+   ```powershell
+   .\seapig-windows-amd64.exe --help
+   ```
+   On macOS or Linux, make it executable first, then run the matching filename:
    ```bash
-   chmod +x seapig-darwin-arm64
-   mv seapig-darwin-arm64 /usr/local/bin/seapig
+   chmod +x ./seapig-darwin-arm64 # use the downloaded filename
+   ./seapig-darwin-arm64 --help
+   ```
+
+The platform packages include the daemon files Sea Pig needs at runtime. Java/Kotlin still require a JDK and Maven or Gradle; Python requires pytest. For JavaScript/TypeScript, install the bundled daemon dependencies from the extracted directory with `npm ci --prefix servers`.
