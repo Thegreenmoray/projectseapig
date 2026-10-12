@@ -83,7 +83,7 @@ func TestMatchingTestSelectorAggregatesFrameworkResults(t *testing.T) {
 		wantOK     bool
 	}{
 		{"com.example.WidgetTest::handles empty value", "com.example.WidgetTest", true},
-		{"src/widget.test.ts::renders widget", "src/widget.test.ts", true},
+		{"src/widget.test.ts::Math Utilities > adds two numbers correctly", "src/widget.test.ts", true},
 		{"com.example.WidgetTest", "com.example.WidgetTest", true},
 		{"<daemon>", "", false},
 	}
@@ -92,6 +92,21 @@ func TestMatchingTestSelectorAggregatesFrameworkResults(t *testing.T) {
 		if got != test.want || ok != test.wantOK {
 			t.Errorf("matchingTestSelector(%q) = (%q, %t), want (%q, %t)", test.resultName, got, ok, test.want, test.wantOK)
 		}
+	}
+}
+
+func TestIsTimedOutResultRequiresExplicitTimeoutSignal(t *testing.T) {
+	result := runners.TestResult{
+		Passed: false,
+		Stderr: "Connection reset by peer: Request timed out after 5000ms",
+	}
+	if isTimedOutResult(result) {
+		t.Fatal("ordinary test failure mentioning timeout must not be treated as a runner timeout")
+	}
+
+	result.TimedOut = true
+	if !isTimedOutResult(result) {
+		t.Fatal("runner timeout flag must be preserved")
 	}
 }
 

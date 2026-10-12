@@ -80,7 +80,7 @@ the current file or discovery phase, and elapsed time.`,
 			progressbar.OptionSetDescription("[seapig] Running tests..."),
 			progressbar.OptionShowCount(),
 			progressbar.OptionShowIts(),
-			progressbar.OptionSetItsString("tests"),
+			progressbar.OptionSetItsString("targets"),
 			progressbar.OptionOnCompletion(func() {
 				fmt.Println("\n[seapig] Finished running test queue!")
 			}),
@@ -105,9 +105,11 @@ the current file or discovery phase, and elapsed time.`,
 		anyFailed := false
 		completedTests := make(map[string]struct{}, len(names))
 		for result := range results {
-			_ = bar.Add(1)
 			if selector, ok := matchingTestSelector(result.Testname, names); ok {
-				completedTests[selector] = struct{}{}
+				if _, completed := completedTests[selector]; !completed {
+					completedTests[selector] = struct{}{}
+					_ = bar.Add(1)
+				}
 			}
 			//log.Info().Msgf("--- Test Name: %s ---", result.Testname)
 			//log.Info().Msgf("Passed: %t", result.Passed)
@@ -116,12 +118,15 @@ the current file or discovery phase, and elapsed time.`,
 
 			if !result.Passed {
 				anyFailed = true
+				status := "FAIL"
 				if isTimedOutResult(result) {
+					status = "TIMEOUT"
 					selector := testSelectorForResult(result.Testname, names)
 					if err := repo.SaveTimedOutTest(selector); err != nil {
 						log.Error().Err(err).Msgf("Failed to exclude timed-out test %s", selector)
 					}
 				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "[seapig] %s %s\n", status, result.Testname)
 				//if it fails we get a skewed runtime, this cannot be allowed.
 				continue
 			}
@@ -157,11 +162,7 @@ the current file or discovery phase, and elapsed time.`,
 }
 
 func isTimedOutResult(result runners.TestResult) bool {
-	if result.TimedOut {
-		return true
-	}
-	message := strings.ToLower(result.Stderr + "\n" + result.Stdout)
-	return strings.Contains(message, "timed out") || strings.Contains(message, "timeout")
+	return result.TimedOut
 }
 
 func matchingTestSelector(resultName string, selectors []string) (string, bool) {

@@ -41,8 +41,7 @@ interface TestResult {
 }
 
 function isTimeoutMessage(message: string): boolean {
-    const normalized = message.toLowerCase();
-    return normalized.includes('timed out') || normalized.includes('timeout');
+    return /exceeded timeout of \d+\s*ms for a test/i.test(message);
 }
 
 async function executeJestTest(testPath: string, projectRoot: string, timeoutMs: number): Promise<TestResult[]> {
@@ -69,7 +68,7 @@ async function executeJestTest(testPath: string, projectRoot: string, timeoutMs:
         for (const testFile of results.testResults) {
             for (const assertion of testFile.testResults) {
                 mappedResults.push({
-                    test_name: `${testFile.testFilePath}::${assertion.title}`,
+                    test_name: `${testFile.testFilePath}::${[...assertion.ancestorTitles, assertion.title].join(' > ')}`,
                     passed: assertion.status !== 'failed',
                     time_taken: (assertion.duration || 0) * 1e6,
                     stdout: '',

@@ -21,6 +21,12 @@ Flaky tests produce non-deterministic results for the exact same code and input.
 
 Sea Pig executes your unit test suite concurrently across multiple loop iterations under identical inputs. If a test passes on one run and fails on another, Sea Pig immediately flags it as **flaky**, pinpoints the exact test case, and logs the result to a local embeddable database (`bbolt`).
 
+Results and timing history are recorded per test case where the framework reports them, not as one pass/fail for an entire source file. For example, Jest results include the nested `describe` names and individual test title. A test failure whose message happens to mention a timeout is not treated as SeaPig's execution timeout; only an explicit runner timeout is excluded from subsequent runs.
+
+```text
+[seapig] FAIL src/math.test.ts::Network Service > fetches user configuration profile
+```
+
 ---
 
 ## 💻 Language Support
@@ -88,6 +94,13 @@ discovery_timeout: 10m
 Note: Running seapig from the root directory of your project delivers the best auto-discovery results.
 
 ⚠️ Known Issues & Troubleshooting
+Windows Antivirus Detections
+Issue: Windows Defender or other antivirus software may flag a SeaPig Windows or other executable as `Trojan:Win32/Wacatac.C!ml` or similar. The detection observed for this project quarantined `seapig.exe` before it ran. This heuristic alert may be a false positive, but the alert alone cannot establish that a particular executable is safe.
+
+SeaPig starts child processes for the selected test toolchain (Go, Gradle/Maven, Node/Jest, or Python/pytest); these are required to discover and run tests. Source inspection found no separate payload downloader or persistence behavior.
+
+Do not disable antivirus protection or restore/whitelist a flagged file solely based on this note. Verify the executable came from the official project source or release, compare its hash with a trusted copy, and submit a suspected false positive to Microsoft for analysis before running it.
+
 Windows OneDrive File Sync
 Issue: seapig may occasionally fail or experience file access errors when run inside folders actively synced by Windows OneDrive.
 
@@ -118,4 +131,3 @@ https://www.youtube.com/watch?v=Tv9dF2q3now&t=40s
    ```bash
    chmod +x seapig-darwin-arm64
    mv seapig-darwin-arm64 /usr/local/bin/seapig
-

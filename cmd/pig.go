@@ -270,6 +270,9 @@ func results1(errorOutputs map[string]string, repo *logs.BoltRepo, testing map[s
 		}
 
 		runners.Results(&batchResult)
+		if batchResult.FailCount > 0 {
+			log.Warn().Msgf("Test %s failed %d/%d runs", testName, batchResult.FailCount, len(runs))
+		}
 
 		if err := repo.SavePig(testName, &batchResult); err != nil {
 			log.Error().Err(err).Msgf(factory.Red+"failed to save logs for %s", testName)

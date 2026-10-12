@@ -212,6 +212,7 @@ public class Server {
                 String failure = childText(testCase, "failure");
                 String error = childText(testCase, "error");
                 String name = testCase.getAttribute("name");
+                boolean timedOut = isFrameworkTimeout(testCase);
                 String resultName = (className.isEmpty() ? testName : className) + "::" + name;
                 String seconds = testCase.getAttribute("time");
                 long duration = 0;
@@ -228,7 +229,7 @@ public class Server {
                     duration,
                     childText(testCase, "system-out"),
                     stderr,
-                    isTimeoutMessage(stderr)
+                    timedOut
                 ));
             }
             return results;
@@ -257,9 +258,19 @@ public class Server {
         return null;
     }
 
-    private static boolean isTimeoutMessage(String message) {
-        String normalized = message.toLowerCase(Locale.ROOT);
-        return normalized.contains("timed out") || normalized.contains("timeout");
+    private static boolean isFrameworkTimeout(Element testCase) {
+        for (String tagName : List.of("failure", "error")) {
+            NodeList children = testCase.getElementsByTagName(tagName);
+            if (children.getLength() == 0) {
+                continue;
+            }
+            String type = ((Element) children.item(0)).getAttribute("type");
+            if (type.equals("org.junit.runners.model.TestTimedOutException")
+                    || type.equals("java.util.concurrent.TimeoutException")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String[] parseTestNames(String json) {

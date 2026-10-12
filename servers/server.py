@@ -49,8 +49,8 @@ class SeapigCollector:
 
 
 def is_timeout_message(message):
-    message = message.lower()
-    return "timed out" in message or "timeout" in message
+    normalized = message.strip().lower()
+    return normalized.startswith("failed: timeout") or normalized.startswith("timeout >")
 
 
 def run_test_process(test_name, project_root, timeout_seconds):
@@ -167,5 +167,4 @@ def main():
 
 if __name__ == "__main__":
     main()          
-
 
