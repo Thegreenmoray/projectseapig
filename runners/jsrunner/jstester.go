@@ -1,6 +1,8 @@
 package jsrunner
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,17 +11,20 @@ import (
 	"strings"
 	"time"
 
-	//"strings"
-
 	"github.com/Justi/projectseapig/runners"
 )
 
 type JStester struct {
-	ProjectPath string // Target workspace path (e.g., "C:\Users\...\untitled3")
-	BinPath     string // e.g., "npm" or "npx"
-	BaseArgs    []string
-	Timeout     time.Duration
-	Env         []string
+	ProjectPath       string // Target workspace path (e.g., "C:\Users\...\untitled3")
+	BinPath           string // e.g., "npm" or "npx"
+	BaseArgs          []string
+	Timeout           time.Duration
+	Env               []string
+	DiscoveryProgress runners.DiscoveryProgress
+}
+
+func (j *JStester) SetDiscoveryProgress(progress runners.DiscoveryProgress) {
+	j.DiscoveryProgress = progress
 }
 
 func (j *JStester) ListTests(projectPath string) ([]string, error) {
@@ -43,63 +48,37 @@ func (j *JStester) ListTests(projectPath string) ([]string, error) {
 	}
 	cmd.Dir = projectPath // Uses the passed parameter during discovery
 
-	out, err := cmd.CombinedOutput()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("JS test discovery failed: %v | output: %s", err, string(out))
+		return nil, fmt.Errorf("JS test discovery failed: could not read command output: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("JS test discovery failed: %v | output: %s", err, stderr.String())
 	}
 
-	lines := strings.Split(string(out), "\n")
 	var tests []string
-	for _, line := range lines {
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
 		line = strings.TrimSpace(line)
 		if line != "" {
 			tests = append(tests, line)
+			if j.DiscoveryProgress != nil {
+				j.DiscoveryProgress(len(tests), -1, line)
+			}
 		}
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	output := stderr.String()
+	if scanErr != nil {
+		return nil, fmt.Errorf("JS test discovery failed: could not read command output: %w | output: %s", scanErr, output)
+	}
+	if waitErr != nil {
+		return nil, fmt.Errorf("JS test discovery failed: %v | output: %s", waitErr, output)
 	}
 
 	return tests, nil
-}
-
-func (j *JStester) RunTest(testName string) (runners.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), j.Timeout)
-	defer cancel()
-
-	bin := j.BinPath
-	if bin == "" {
-		bin = "npm"
-	}
-
-	var args []string
-	if strings.Contains(bin, "npm") {
-		args = append([]string{"test", "--silent", "--"}, j.BaseArgs...)
-		args = append(args, "-t", testName, "--runInBand", "--no-coverage")
-	} else {
-		args = append(j.BaseArgs, "-t", testName, "--runInBand", "--no-coverage", "--silent")
-	}
-
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = j.ProjectPath // CRITICAL: Sets working dir to the project root
-
-	env := os.Environ()
-	env = append(env, "NODE_ENV=test")
-	if len(j.Env) > 0 {
-		env = append(env, j.Env...)
-	}
-	cmd.Env = env
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	passed := err == nil
-
-	if ctx.Err() == context.DeadlineExceeded {
-		passed = false
-		out = append(out, []byte("\n--- PROJECT SEAPIG: JavaScript execution timed out! ---")...)
-	}
-
-	return runners.TestResult{
-		Testname:  testName,
-		Passed:    passed,
-		Stdout:    string(out),
-		Timetaken: time.Since(start),
-	}, nil
 }

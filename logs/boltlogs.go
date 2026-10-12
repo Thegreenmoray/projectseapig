@@ -53,3 +53,87 @@ func (r *BoltRepo) SavePig(testName string, pig *runners.Pig) error {
 		return bucket.Put([]byte(key), pigBytes)
 	})
 }
+
+func (r *BoltRepo) SavePigtime(testName string, pig *runners.Pig) error {
+	return r.db.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte("TestTime"))
+		if err != nil {
+			return err
+		}
+
+		// Preserve existing timestamp or set fallback
+		if pig.Dateandtime == "" {
+			pig.Dateandtime = time.Now().Format(time.RFC3339)
+		}
+		for i := 0; i < len(pig.Run); i++ {
+			pigBytes, err := json.Marshal(pig.Run[i].Timetaken.Nanoseconds()) //just return the test results
+			if err != nil {
+				return err
+			}
+			key := fmt.Sprintf("%s_%d", testName, i)
+
+			if err := bucket.Put([]byte(key), pigBytes); err != nil {
+				return fmt.Errorf("cannot store data: %w", err)
+			}
+
+		}
+
+		return nil
+	})
+}
+
+func (r *BoltRepo) SaveTimedOutTest(testName string) error {
+	return r.db.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte("TimedOutTests"))
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(testName), []byte{1})
+	})
+}
+
+func (r *BoltRepo) ExtractTimedOutTests() (map[string]bool, error) {
+	timedOut := make(map[string]bool)
+	err := r.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("TimedOutTests"))
+		if bucket == nil {
+			return nil
+		}
+		return bucket.ForEach(func(key, _ []byte) error {
+			timedOut[string(key)] = true
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return timedOut, nil
+}
+
+func (r *BoltRepo) Extractpigtime() (map[string]int64, error) {
+	results := make(map[string]int64)
+
+	err := r.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("TestTime"))
+		if b == nil {
+			return nil
+		}
+
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var durationNs int64
+			if err := json.Unmarshal(v, &durationNs); err != nil {
+				return fmt.Errorf("failed to parse test time for key %s: %w", string(k), err)
+			}
+
+			results[string(k)] = durationNs
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}

@@ -4,22 +4,30 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/Justi/projectseapig/runners"
-	// Ensure your runners import is here
+)
+
+var (
+	sourcePackagePattern = regexp.MustCompile(`(?m)^\s*package\s+([\w.]+)`)
+	kotlinClassPattern   = regexp.MustCompile(`\b(?:class|object)\s+([A-Za-z_][A-Za-z0-9_]*)`)
 )
 
 type Javatester struct {
-	BinPath     string   // e.g., "mvn" or "gradlew"
-	BaseArgs    []string // e.g., []string{"test"}
-	Timeout     time.Duration
-	Env         []string
-	ProjectPath string // Added to ensure cmd.Dir points to the right spot
+	BinPath           string   // e.g., "mvn" or "gradlew"
+	BaseArgs          []string // e.g., []string{"test"}
+	Timeout           time.Duration
+	Env               []string
+	ProjectPath       string // Added to ensure cmd.Dir points to the right spot
+	DiscoveryProgress runners.DiscoveryProgress
+}
+
+func (g *Javatester) SetDiscoveryProgress(progress runners.DiscoveryProgress) {
+	g.DiscoveryProgress = progress
 }
 
 func (g *Javatester) ListTests(projectPath string) ([]string, error) {
@@ -43,91 +51,99 @@ func (g *Javatester) ListTests(projectPath string) ([]string, error) {
 		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
 	}
 
-	// Target the standard Java test source directory
-	testRoot := filepath.Join(projectPath, "src", "test", "java")
-	searchPath := projectPath
-	if _, err := os.Stat(testRoot); err == nil {
-		searchPath = testRoot
+	// 1. Identify valid test source roots (Java and/or Kotlin)
+	var searchPaths []string
+	javaRoot := filepath.Join(projectPath, "src", "test", "java")
+	kotlinRoot := filepath.Join(projectPath, "src", "test", "kotlin")
+
+	if _, err := os.Stat(javaRoot); err == nil {
+		searchPaths = append(searchPaths, javaRoot)
+	}
+	if _, err := os.Stat(kotlinRoot); err == nil {
+		searchPaths = append(searchPaths, kotlinRoot)
 	}
 
-	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
+	// Fallback to scanning the whole project path if standard paths aren't found
+	if len(searchPaths) == 0 {
+		searchPaths = append(searchPaths, projectPath)
+	}
 
-		// Check if the timeout context was canceled during a long walk
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("java test discovery timed out after %v while scanning file tree", g.Timeout)
-		default:
-		}
-
-		if !info.IsDir() && strings.HasSuffix(info.Name(), "Test.java") {
-			relPath, err := filepath.Rel(searchPath, path)
+	// 2. Walk through all identified search paths
+	for _, searchPath := range searchPaths {
+		err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 
-			cleanPath := strings.TrimSuffix(relPath, ".java")
-			fqcn := strings.ReplaceAll(cleanPath, string(os.PathSeparator), ".")
+			if g.DiscoveryProgress != nil {
+				g.DiscoveryProgress(len(tests), -1, path)
+			}
 
-			tests = append(tests, fqcn)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("test discovery timed out after %v while scanning file tree", g.Timeout)
+			default:
+			}
+
+			if !info.IsDir() {
+				name := strings.ToLower(info.Name())
+				ext := filepath.Ext(name)
+				if (ext != ".java" && ext != ".kt") ||
+					(!strings.HasSuffix(name, "test"+ext) && !strings.HasSuffix(name, "tests"+ext)) {
+					return nil
+				}
+
+				source, err := os.ReadFile(path)
+				if err != nil {
+					return fmt.Errorf("cannot read test source %q: %w", path, err)
+				}
+
+				relPath, err := filepath.Rel(searchPath, path)
+				if err != nil {
+					return err
+				}
+				className := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
+				if ext == ".kt" {
+					className = kotlinTestClassName(source, className)
+				}
+
+				packageName := sourcePackagePattern.FindSubmatch(source)
+				if len(packageName) > 1 {
+					tests = append(tests, string(packageName[1])+"."+className)
+				} else {
+					relativeDir := filepath.Dir(relPath)
+					if relativeDir != "." {
+						className = strings.ReplaceAll(relativeDir, string(os.PathSeparator), ".") + "." + className
+					}
+					tests = append(tests, className)
+				}
+				if g.DiscoveryProgress != nil {
+					g.DiscoveryProgress(len(tests), -1, path)
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
+	}
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("java test discovery timed out after %v while scanning file tree", g.Timeout)
+		return nil, fmt.Errorf("test discovery timed out after %v while scanning file tree", g.Timeout)
 	}
 
-	return tests, err
+	return tests, nil
 }
 
-func (g *Javatester) RunTest(testName string) (runners.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
-	defer cancel()
-
-	bin := g.BinPath
-	var args []string
-
-	// 1. Build CLI args with performance flags (-q for quiet, -o for offline/no-remote-check)
-	if strings.Contains(bin, "mvn") {
-		args = append([]string{"test", "-q", "-o", "-B", "-Dtest=" + testName})
-	} else {
-		// Gradle execution
-		args = append([]string{"test", "-q", "--tests", testName})
-		if bin == "gradlew" {
-			if runtime.GOOS == "windows" {
-				bin = ".\\gradlew.bat"
-			} else {
-				bin = "./gradlew"
-			}
+func kotlinTestClassName(source []byte, fileName string) string {
+	for _, match := range kotlinClassPattern.FindAllSubmatch(source, -1) {
+		className := string(match[1])
+		lowerClassName := strings.ToLower(className)
+		if strings.HasSuffix(lowerClassName, "test") || strings.HasSuffix(lowerClassName, "tests") {
+			return className
 		}
 	}
 
-	// 2. Resolve relative path for wrapper scripts
-	absBin := bin
-	if strings.HasPrefix(bin, ".") || bin == "gradlew.bat" {
-		if resolved, err := filepath.Abs(filepath.Join(g.ProjectPath, bin)); err == nil {
-			absBin = resolved
-		}
-	}
-
-	// 3. Command setup
-	cmd := exec.CommandContext(ctx, absBin, args...)
-	cmd.Dir = g.ProjectPath
-
-	if len(g.Env) > 0 {
-		cmd.Env = g.Env
-	}
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-
-	return runners.TestResult{
-		Testname:  testName,
-		Passed:    err == nil,
-		Stdout:    string(out),
-		Timetaken: time.Since(start),
-	}, nil
+	return fileName + "Kt"
 }

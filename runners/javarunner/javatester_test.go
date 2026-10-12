@@ -3,6 +3,8 @@ package javarunner
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 )
@@ -18,6 +20,15 @@ func TestJavaListTests(t *testing.T) {
 	tester := Javatester{
 		Timeout: 60 * time.Second,
 	}
+	sawTestFileProgress := false
+	tester.SetDiscoveryProgress(func(completed, total int, item string) {
+		if total != -1 || item == "" {
+			t.Errorf("unexpected discovery progress: total=%d item=%q", total, item)
+		}
+		if completed == 1 && filepath.Base(item) == "MathTest.java" {
+			sawTestFileProgress = true
+		}
+	})
 	tests, err := tester.ListTests(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -26,71 +37,51 @@ func TestJavaListTests(t *testing.T) {
 	if len(tests) != 1 || tests[0] != "MathTest" {
 		t.Errorf("Expected MathTest, got %v", tests)
 	}
-}
-
-func TestJavaRunTestpom(t *testing.T) {
-	tester := Javatester{
-		Timeout:  60 * time.Second,
-		BinPath:  "mvn",
-		BaseArgs: []string{"test"},
-	}
-	dir := t.TempDir()
-
-	// 1. Create pom.xml inside the temp directory
-	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project/>"), 0644)
-
-	// 2. Save the original working directory path
-	oldWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get current working directory: %v", err)
-	}
-
-	// 3. Jump inside the temp directory
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("failed to change working directory: %v", err)
-	}
-
-	// 4. CRITICAL: Tell Go to jump back to your project folder when this test finishes
-	defer os.Chdir(oldWD)
-
-	// 5. Run the test! Now os.Stat("pom.xml") evaluates to true!
-	result, _ := tester.RunTest("MathTest")
-
-	if result.Testname != "MathTest" {
-		t.Errorf("Expected test name MathTest, got %s", result.Testname)
+	if !sawTestFileProgress {
+		t.Error("discovery progress did not report the discovered Java test file")
 	}
 }
 
-func TestJavaRunTestgradle(t *testing.T) {
-	tester := Javatester{
-		Timeout:  60 * time.Second,
-		BinPath:  "gradlew.bat",
-		BaseArgs: []string{"test"},
-	}
+func TestJavaListTestsFindsCaseInsensitiveKotlinFilesAndDeclaredClasses(t *testing.T) {
 	dir := t.TempDir()
+	testDir := filepath.Join(dir, "src", "test", "kotlin", "com", "example")
+	if err := os.MkdirAll(testDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
-	// 1. Create build.gradle inside the temp directory
-	os.WriteFile(filepath.Join(dir, "build.gradle"), []byte("<project/>"), 0644)
+	testFile := filepath.Join(testDir, "test.kt")
+	testSource := []byte("package com.example\n\nclass AppTest {\n    fun testGreeting() {}\n}\n")
+	if err := os.WriteFile(testFile, testSource, 0644); err != nil {
+		t.Fatal(err)
+	}
 
-	// 2. Save the original working directory path
-	oldWD, err := os.Getwd()
+	tester := Javatester{Timeout: time.Minute}
+	tests, err := tester.ListTests(dir)
 	if err != nil {
-		t.Fatalf("failed to get current working directory: %v", err)
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(tests, []string{"com.example.AppTest"}) {
+		t.Fatalf("ListTests() = %v, want [com.example.AppTest]", tests)
+	}
+}
+
+func TestJavaListTestsFindsLowercaseTestSuffix(t *testing.T) {
+	dir := t.TempDir()
+	testDir := filepath.Join(dir, "src", "test", "kotlin")
+	if err := os.MkdirAll(testDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testDir, "mathTest.kt"), []byte("class MathTest"), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	// 3. Jump inside the temp directory
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("failed to change working directory: %v", err)
+	tester := Javatester{Timeout: time.Minute}
+	tests, err := tester.ListTests(dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// 4. CRITICAL: Tell Go to jump back to your project folder when this test finishes
-	defer os.Chdir(oldWD)
-
-	// 5. Run the test! Now os.Stat("build.gradle") evaluates to true!
-	result, _ := tester.RunTest("MathTest")
-
-	if result.Testname != "MathTest" {
-		t.Errorf("Expected test name MathTest, got %s", result.Testname)
+	sort.Strings(tests)
+	if !reflect.DeepEqual(tests, []string{"MathTest"}) {
+		t.Fatalf("ListTests() = %v, want [MathTest]", tests)
 	}
-
 }

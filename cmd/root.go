@@ -21,6 +21,13 @@ var rootCmd = &cobra.Command{
 	Use:   "projectseapig",
 	Short: "A Flaky test detector for API testing.",
 	Long:  `A Flaky test detector for API testing. It allows you to run tests, view logs, and manage your test history.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := factory.InitConfig(); err != nil {
+			return err
+		}
+		factory.InitLogger(debug || factory.Cfg.Debug)
+		return nil
+	},
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	// Run: func(cmd *cobra.Command, args []string) { },
@@ -30,7 +37,6 @@ var rootCmd = &cobra.Command{
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	err := rootCmd.Execute()
-	factory.InitLogger(debug)
 	if err != nil {
 		os.Exit(1)
 	}

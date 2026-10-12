@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/runners/gorunner"
 	"github.com/Justi/projectseapig/runners/javarunner"
 	"github.com/Justi/projectseapig/runners/jsrunner"
@@ -15,14 +17,99 @@ import (
 	"github.com/Justi/projectseapig/runners"
 )
 
-func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
-	timeout, err := time.ParseDuration(Cfg.Timeout)
-	if err != nil || timeout <= 0 {
-		timeout = 10 * time.Second
+// just go for now, will be updated later
+
+func seapigServerPath(parts ...string) string {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return filepath.Join(append([]string{"servers"}, parts...)...)
+	}
+	repoRoot := filepath.Dir(filepath.Dir(sourceFile))
+	return filepath.Join(append([]string{repoRoot, "servers"}, parts...)...)
+}
+
+func newDaemonSocketPath() (string, error) {
+	file, err := os.CreateTemp("", "seapig-*.sock")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func Daemontype(lang string, projectPath string) (daemons.TestExecutor, error) {
+	normalizedLang := strings.ToLower(lang)
+	timeout := configuredTestTimeout()
+	if normalizedLang == "go" {
+		binName := "seapig_test_runner"
+		if runtime.GOOS == "windows" {
+			binName += ".exe"
+		}
+		return &daemons.GoCompiler{
+			ProjectPath:  projectPath,
+			CompiledPath: filepath.Join(projectPath, "bin", binName),
+			Timeout:      timeout,
+		}, nil
 	}
 
-	switch lang {
-	case "java":
+	socketPath, err := newDaemonSocketPath()
+	if err != nil {
+		return nil, err
+	}
+	projectRoot, err := filepath.Abs(projectPath)
+	if err != nil {
+		return nil, err
+	}
+
+	switch normalizedLang {
+	case "java", "kotlin":
+		return &daemons.JavaDaemon{
+			TestPath:    filepath.Join(projectRoot, "src", "test"),
+			ProjectRoot: projectRoot,
+			DaemonPath:  seapigServerPath("build", "libs", "seapig-server-1.0-SNAPSHOT.jar"),
+			IsKotlin:    normalizedLang == "kotlin",
+			Timeout:     timeout,
+			DaemonBase:  daemons.DaemonBase{Socketpath: socketPath},
+		}, nil
+
+	case "js", "ts":
+		return &daemons.JsDaemon{
+			NodePath:   projectRoot,
+			DaemonPath: seapigServerPath("server.ts"),
+			IsTS:       normalizedLang == "ts",
+			Timeout:    timeout,
+			DaemonBase: daemons.DaemonBase{Socketpath: socketPath},
+		}, nil
+
+	case "python":
+		return &daemons.PythonDaemon{
+			ProjectRoot: projectRoot,
+			DaemonPath:  seapigServerPath("server.py"),
+			Timeout:     timeout,
+			DaemonBase:  daemons.DaemonBase{Socketpath: socketPath},
+		}, nil
+
+	default:
+		return nil, errors.ErrUnsupported
+	}
+}
+
+func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
+	timeout := configuredTestTimeout()
+	discoveryTimeout, err := time.ParseDuration(Cfg.DiscoveryTimeout)
+	if err != nil || discoveryTimeout <= 0 {
+		discoveryTimeout = 5 * time.Minute
+	}
+
+	switch strings.ToLower(lang) {
+	case "java", "kotlin":
 		// Set up smart defaults
 		bin := "mvn"
 		args := []string{"test"}
@@ -46,7 +133,7 @@ func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 			Timeout:     timeout,
 			ProjectPath: projectPath, // Pass this down so RunTest knows where to execute
 		}, nil
-	case "js":
+	case "js", "ts":
 		return &jsrunner.JStester{
 			BinPath:  "npm",
 			BaseArgs: []string{"test", "--"},
@@ -54,9 +141,10 @@ func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 		}, nil
 	case "go":
 		return &gorunner.Gotester{
-			BinPath:  "go",
-			BaseArgs: []string{"test"},
-			Timeout:  timeout,
+			BinPath:          "go",
+			BaseArgs:         []string{"test"},
+			Timeout:          timeout,
+			DiscoveryTimeout: discoveryTimeout,
 		}, nil
 	case "python":
 		// Using pytest as the default execution tool
@@ -68,4 +156,12 @@ func Testtype(lang string, projectPath string) (runners.TestRunner, error) {
 	default:
 		return nil, errors.New("Lang not supported...")
 	}
+}
+
+func configuredTestTimeout() time.Duration {
+	timeout, err := time.ParseDuration(Cfg.Timeout)
+	if err != nil || timeout <= 0 {
+		return 10 * time.Second
+	}
+	return timeout
 }

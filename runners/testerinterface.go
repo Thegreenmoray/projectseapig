@@ -4,7 +4,12 @@ import "time"
 
 type TestRunner interface {
 	ListTests(projectPath string) ([]string, error)
-	RunTest(testName string) (TestResult, error)
+}
+
+type DiscoveryProgress func(completed, total int, item string)
+
+type DiscoveryProgressReporter interface {
+	SetDiscoveryProgress(DiscoveryProgress)
 }
 
 type Pig struct {
@@ -21,6 +26,7 @@ type Pig struct {
 type TestResult struct {
 	Testname  string            `json:"test_name"`
 	Passed    bool              `json:"passed"`
+	TimedOut  bool              `json:"timed_out,omitempty"`
 	Timetaken time.Duration     `json:"time_taken"`
 	Timestamp time.Time         `json:"timestamp"`
 	Exitcode  int               `json:"exit_code"`

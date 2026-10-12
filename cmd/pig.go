@@ -13,6 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"container/heap"
+
+	"github.com/Justi/projectseapig/daemons"
 	"github.com/Justi/projectseapig/factory"
 	"github.com/Justi/projectseapig/logs"
 	"github.com/Justi/projectseapig/runners"
@@ -25,7 +28,32 @@ import (
 var n int
 var l string
 var deep bool
-var testLock sync.Mutex
+
+type Pair struct {
+	Time     int64
+	Testname string
+}
+
+// IntHeap schedules tests with the shortest previous runtimes first.
+type IntHeap []Pair
+
+func (h IntHeap) Len() int { return len(h) }
+
+func (h IntHeap) Less(i, j int) bool { return h[i].Time < h[j].Time }
+
+func (h IntHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+
+func (h *IntHeap) Push(x any) {
+	*h = append(*h, x.(Pair))
+}
+
+func (h *IntHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
 
 // pigCmd represents the pig command
 var pigCmd = &cobra.Command{
@@ -35,36 +63,62 @@ var pigCmd = &cobra.Command{
 	. WARNING this process can be Long and CPU intensive, you will be given a chance
 	 to back out if you are not ready`,
 	Run: func(cmd *cobra.Command, args []string) {
-		loopFlag, _ := cmd.Flags().GetInt("loop")
-		n = loopFlag //self explaintory just how many times you want to loop.
+		n = configuredLoopCount(cmd)
 
 		cancontinue, tester := verification()
 		if !cancontinue {
 			return
-		} //if user does not say yes or y, stop immedatly
+		}
+
+		daemon, err := factory.Daemontype(l, ".")
+		if err != nil {
+			log.Error().Err(err).Msg("failed to initialize daemon")
+			return
+		}
 
 		log.Info().Msg(factory.Yellow + "sending the herd! this may take a while....." + factory.Reset)
 
 		if deep {
 			n = 100
 		}
-		//finds all tests if any.
+
 		tests, err := tester.ListTests(".")
-		if err != nil {
-			log.Error().Err(err).Msg("failed to list tests")
+		if err != nil || len(tests) == 0 {
+			log.Error().Err(err).Msg("failed to list tests or no tests found")
 			return
 		}
 
+		timingRepo, err := logs.NewBoltRepo("seapig.db")
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open test timing history")
+			return
+		}
+		hashmap, err := timingRepo.Extractpigtime()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to read test timing history")
+			_ = timingRepo.Close()
+			return
+		}
+		timedOutTests, err := timingRepo.ExtractTimedOutTests()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to read timed-out test history")
+			_ = timingRepo.Close()
+			return
+		}
+		if err := timingRepo.Close(); err != nil {
+			log.Error().Err(err).Msg("failed to close test timing history")
+		}
+		tests = excludeTimedOutTests(tests, timedOutTests)
 		if len(tests) == 0 {
-			log.Info().Msg("no tests found")
+			log.Info().Msg("No tests to run: all discovered tests have timed out previously")
+			return
 		}
-		//will be editable in config file or some other means
-		if n == 10 && factory.Cfg.Workers > 0 {
-			n = factory.Cfg.Workers
-		}
-
 		totalExpectedResults := len(tests) * n
-		c := make(chan runners.TestResult, totalExpectedResults)
+		c := make(chan []runners.TestResult, totalExpectedResults)
+
+		cpucores := runtime.GOMAXPROCS(0) * 2
+
+		sliceofslices := greedySchedule(tests, n, cpucores, hashmap)
 
 		bar := progressbar.NewOptions(totalExpectedResults,
 			progressbar.OptionEnableColorCodes(true),
@@ -87,105 +141,123 @@ var pigCmd = &cobra.Command{
 
 		var wg sync.WaitGroup
 
-		// 2. Instantiate a fixed PoolWithFunc.
-		// The worker function is defined ONCE here.
-		//ants is a more efficent goroutine, old way would spawn too many goroutines
-		//using up too many resources, based on available cpu cores, accounts for VMs or CI/CD pipelines
-		pool, _ := ants.NewPoolWithFunc(runtime.GOMAXPROCS(0)*2, func(payload interface{}) {
-
-			//this is functional equvient to a lambda expression
-			//recive the the data from the method below
+		if err := daemon.Start(); err != nil {
+			log.Error().Err(err).Msg("failed to start test daemon")
+			return
+		}
+		pool, _ := ants.NewPoolWithFunc(cpucores, func(payload interface{}) {
 			args := payload.(taskArgs)
-
-			//defer just waits until we finish everything, even if it panics. prevents deadlocks.
 			defer args.wg.Done()
 
-			// if we do not do this, or put it at the bottom (or just lower) then the system can deadlock.
-			start := time.Now()
-
-			//allows process to build without risking early timeout, also prevents database deadlocks, file collisions, or shared port conflicts
-			//by pausing for a moment each process.
-			testLock.Lock()
-
-			result, err := args.tester.RunTest(args.testName)
-
-			testLock.Unlock()
-
-			result.Timetaken = time.Since(start)
-
-			//	log.Info().Msgf("%s", args.testName)
-			if result.Testname == "" {
-				result.Testname = args.testName // Guarantee it's never a blank string
-			}
-			//stores our error if we have one
+			results, err := daemon.RunTests(args.testNames)
 			if err != nil {
-				result.Stderr = err.Error()
+				log.Error().Err(err).Msgf("Daemon execution failed for batch: %v", args.testNames)
+				return
 			}
-			//adds it to channel
-			args.ch <- result
+			for index := range results {
+				if !isTimedOutResult(results[index]) {
+					continue
+				}
+				if results[index].Metadata == nil {
+					results[index].Metadata = make(map[string]string)
+				}
+				results[index].Metadata["seapig_selector"] = testSelectorForResult(results[index].Testname, args.testNames)
+			}
 
-			// -------------------------------------------------------------
-			// 👉 INCREMENT PROGRESS BAR HERE
-			// schollz/progressbar is thread-safe, so workers can call it directly
-			// -------------------------------------------------------------
-			_ = bar.Add(1)
-
+			if len(results) > 0 {
+				c <- results
+			}
+			_ = bar.Add(len(args.testNames))
 		})
 
-		// 3. The dispatcher loop is now incredibly lightweight
-		for _, testName := range tests {
-			for i := 0; i < n; i++ {
-				wg.Add(1)
-
-				// Pass only the data payload. No new function allocation on the heap!
-				_ = pool.Invoke(taskArgs{
-					testName: testName,
-					tester:   tester,
-					ch:       c,
-					wg:       &wg,
-				})
-			}
+		for _, testnames := range sliceofslices {
+			wg.Add(1)
+			_ = pool.Invoke(taskArgs{
+				testNames: testnames,
+				tester:    daemon,
+				ch:        c,
+				wg:        &wg,
+			})
 		}
 
-		// 4. Teardown remains beautifully non-blocking
-		go func() {
-			wg.Wait()
-			close(c)
-			pool.Release()
-		}()
+		// Bug 2 Fix: Synchronous teardown ensures all results land in channel c before reading
+		wg.Wait()
+		close(c)
+		pool.Release()
+		if err := daemon.Stop(); err != nil {
+			log.Error().Err(err).Msg("failed to stop test daemon")
+		}
 
 		errorOutputs := make(map[string]string)
 		testing := make(map[string][]runners.TestResult)
 
-		for f := range c {
-
-			// If this specific run failed and we don't have an error captured for this test yet
-			if !f.Passed && errorOutputs[f.Testname] == "" {
-				if len(f.Stdout) != 0 {
-					errorOutputs[f.Testname] = f.Stdout
-				} else if len(f.Stderr) != 0 {
-					errorOutputs[f.Testname] = f.Stderr
-				}
+		for testBatch := range c {
+			for _, result := range testBatch {
+				testing[result.Testname] = append(testing[result.Testname], result)
 			}
-
-			testing[f.Testname] = append(testing[f.Testname], f)
 		}
+
 		repo, _ := logs.NewBoltRepo("seapig.db")
 		defer repo.Close()
 
 		results1(errorOutputs, repo, testing)
+	}}
 
-	},
+func configuredLoopCount(cmd *cobra.Command) int {
+	loopFlag, _ := cmd.Flags().GetInt("loop")
+	if !cmd.Flags().Changed("loop") && factory.Cfg.Workers > 0 {
+		return factory.Cfg.Workers
+	}
+	return loopFlag
+}
+
+func greedySchedule(tests []string, runs, workers int, durations map[string]int64) [][]string {
+	if workers < 1 {
+		workers = 1
+	}
+
+	queue := &IntHeap{}
+	heap.Init(queue)
+	for _, testName := range tests {
+		duration := durations[testName]
+		if duration == 0 {
+			duration = durations[fmt.Sprintf("%s_0", testName)]
+		}
+		for i := 0; i < runs; i++ {
+			heap.Push(queue, Pair{Time: duration, Testname: testName})
+		}
+	}
+
+	var batches [][]string
+	for queue.Len() > 0 {
+		batch := make([]string, 0, workers)
+		for len(batch) < workers && queue.Len() > 0 {
+			pair := heap.Pop(queue).(Pair)
+			batch = append(batch, pair.Testname)
+		}
+		batches = append(batches, batch)
+	}
+	return batches
+}
+
+func excludeTimedOutTests(tests []string, timedOut map[string]bool) []string {
+	filtered := make([]string, 0, len(tests))
+	for _, testName := range tests {
+		if !timedOut[testName] {
+			filtered = append(filtered, testName)
+		}
+	}
+	return filtered
 }
 
 //a little messy up here, may want to break this up
 
 // go implictly casts a struct as an interface if an interface is requested
 type taskArgs struct {
-	testName string
-	tester   runners.TestRunner
-	ch       chan<- runners.TestResult
-	wg       *sync.WaitGroup
+	testNames []string
+	tester    daemons.TestExecutor
+	ch        chan<- []runners.TestResult
+	wg        *sync.WaitGroup
 }
 
 func results1(errorOutputs map[string]string, repo *logs.BoltRepo, testing map[string][]runners.TestResult) {
@@ -198,9 +270,24 @@ func results1(errorOutputs map[string]string, repo *logs.BoltRepo, testing map[s
 		}
 
 		runners.Results(&batchResult)
+		if batchResult.FailCount > 0 {
+			log.Warn().Msgf("Test %s failed %d/%d runs", testName, batchResult.FailCount, len(runs))
+		}
 
 		if err := repo.SavePig(testName, &batchResult); err != nil {
 			log.Error().Err(err).Msgf(factory.Red+"failed to save logs for %s", testName)
+		}
+		for _, result := range runs {
+			if isTimedOutResult(result) {
+				selector := result.Testname
+				if result.Metadata != nil && result.Metadata["seapig_selector"] != "" {
+					selector = result.Metadata["seapig_selector"]
+				}
+				if err := repo.SaveTimedOutTest(selector); err != nil {
+					log.Error().Err(err).Msgf(factory.Red+"failed to exclude timed-out test %s", selector)
+				}
+				break
+			}
 		}
 	}
 	log.Info().Msg(factory.Green + "The Herd has finished." + factory.Reset)
@@ -241,7 +328,7 @@ func init() {
 	rootCmd.AddCommand(pigCmd)
 	//25 in 1.0 release but 10 for testing
 	pigCmd.Flags().IntVarP(&n, "loop", "c", 25, "How many times you want to test")
-	pigCmd.Flags().StringVarP(&l, "lang", "a", "", "Language to run tests for (go, python, java, js)")
+	pigCmd.Flags().StringVarP(&l, "lang", "a", "", "Language to run tests for (go, java, kotlin, js, ts, python)")
 	pigCmd.MarkFlagRequired("lang")
 	pigCmd.Flags().BoolVarP(&deep, "deep", "d", false, "Run deep flake detection (100 loops)")
 }

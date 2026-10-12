@@ -1,6 +1,8 @@
 package pythonrunner
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,11 +16,16 @@ import (
 )
 
 type Pythontester struct {
-	ProjectPath string // Target workspace path (e.g., "C:\Users\...\Testsinpython")
-	BinPath     string // e.g., "pytest" or path to virtualenv pytest
-	BaseArgs    []string
-	Timeout     time.Duration
-	Env         []string
+	ProjectPath       string // Target workspace path (e.g., "C:\Users\...\Testsinpython")
+	BinPath           string // e.g., "pytest" or path to virtualenv pytest
+	BaseArgs          []string
+	Timeout           time.Duration
+	Env               []string
+	DiscoveryProgress runners.DiscoveryProgress
+}
+
+func (g *Pythontester) SetDiscoveryProgress(progress runners.DiscoveryProgress) {
+	g.DiscoveryProgress = progress
 }
 
 func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
@@ -34,10 +41,6 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 		bin = "pytest"
 	}
 
-	// --collect-only finds all tests. -q (quiet) strips unnecessary headers.
-	args := append(g.BaseArgs, "--collect-only", "-q")
-
-	cmd := exec.CommandContext(ctx, bin, args...)
 	projectPath = filepath.Clean(projectPath)
 	info, err := os.Stat(projectPath)
 	if err != nil {
@@ -49,73 +52,75 @@ func (g *Pythontester) ListTests(projectPath string) ([]string, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("project path is not a directory: %s", projectPath)
 	}
+
+	args := append([]string(nil), g.BaseArgs...)
+	if bin == "pytest" {
+		for _, candidate := range []string{
+			filepath.Join(projectPath, ".venv", "Scripts", "python.exe"),
+			filepath.Join(projectPath, "venv", "Scripts", "python.exe"),
+			filepath.Join(projectPath, ".venv", "bin", "python"),
+			filepath.Join(projectPath, "venv", "bin", "python"),
+		} {
+			if candidateInfo, statErr := os.Stat(candidate); statErr == nil && !candidateInfo.IsDir() {
+				bin = candidate
+				args = append([]string{"-m", "pytest"}, args...)
+				break
+			}
+		}
+	}
+
+	// --collect-only finds all tests. -q (quiet) strips unnecessary headers.
+	args = append(args, "--collect-only", "-q")
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = projectPath
 	if len(g.Env) > 0 {
 		cmd.Env = g.Env
 	}
 
-	out, err := cmd.CombinedOutput()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil, fmt.Errorf("python test discovery failed: could not read command output: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		out := stderr.String()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("test discovery timed out after %v. A Python test file may be executing heavy code or network calls at module import time instead of inside a fixture", g.Timeout)
+		}
+		return nil, fmt.Errorf("python test discovery failed: %v | output: %s", err, out)
+	}
+
+	var output strings.Builder
+	var tests []string
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		output.WriteString(line)
+		output.WriteByte('\n')
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.Contains(line, "no tests ran") && strings.Contains(line, "::") {
+			tests = append(tests, line)
+			if g.DiscoveryProgress != nil {
+				g.DiscoveryProgress(len(tests), -1, line)
+			}
+		}
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	combinedOutput := output.String() + stderr.String()
+	if waitErr != nil {
 		// 1. Check specifically for context timeout
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("test discovery timed out after %v. A Python test file may be executing heavy code or network calls at module import time instead of inside a fixture", g.Timeout)
 		}
 
 		// 2. Fall back to standard command failure (syntax error, missing pytest, etc.)
-		return nil, fmt.Errorf("python test discovery failed: %v | output: %s", err, string(out))
+		return nil, fmt.Errorf("python test discovery failed: %v | output: %s", waitErr, combinedOutput)
 	}
-
-	lines := strings.Split(string(out), "\n")
-	var tests []string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.Contains(line, "no tests ran") && strings.Contains(line, "::") {
-			tests = append(tests, line)
-		}
+	if scanErr != nil {
+		return nil, fmt.Errorf("python test discovery failed: could not read command output: %w | output: %s", scanErr, combinedOutput)
 	}
 
 	return tests, nil
-}
-
-func (g *Pythontester) RunTest(testName string) (runners.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
-	defer cancel()
-
-	bin := g.BinPath
-	if bin == "" {
-		bin = "pytest"
-	}
-
-	// High-performance Pytest CLI flags:
-	defaultArgs := []string{"-q", "--no-header", "--no-summary"}
-	args := append(defaultArgs, g.BaseArgs...)
-	args = append(args, testName)
-
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = g.ProjectPath // CRITICAL FIX: Directs execution to target project folder
-
-	// Environment Setup: Inject PYTHONDONTWRITEBYTECODE=1 to eliminate pycache disk writes
-	env := os.Environ()
-	env = append(env, "PYTHONDONTWRITEBYTECODE=1")
-	if len(g.Env) > 0 {
-		env = append(env, g.Env...)
-	}
-	cmd.Env = env
-
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	passed := err == nil
-
-	if ctx.Err() == context.DeadlineExceeded {
-		passed = false
-		out = append(out, []byte("\n--- PROJECT SEAPIG: Python execution timed out! ---")...)
-	}
-
-	return runners.TestResult{
-		Testname:  testName,
-		Passed:    passed,
-		Stdout:    string(out),
-		Timetaken: time.Since(start),
-	}, nil
 }

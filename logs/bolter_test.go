@@ -3,6 +3,7 @@ package logs
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Justi/projectseapig/runners"
 )
@@ -35,5 +36,105 @@ func TestSavePig(t *testing.T) {
 
 	if err := repo.SavePig("randomtest", &pig); err != nil {
 		t.Errorf("Expected nil error, got %v", err)
+	}
+}
+func setupTestRepo(t *testing.T) *BoltRepo {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test_sea_pig.db")
+	repo, err := NewBoltRepo(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create temp BoltRepo: %v", err)
+	}
+	return repo
+}
+
+func TestBoltRepo_SavePig_And_Close(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	pig := &runners.Pig{
+		Dateandtime: time.Now().Format(time.RFC3339),
+		Run: []runners.TestResult{
+			{Testname: "TestAuthLogin", Passed: true, Timetaken: 150 * time.Millisecond},
+		},
+	}
+
+	// 1. Test SavePig
+	if err := repo.SavePig("TestAuthLogin", pig); err != nil {
+		t.Fatalf("SavePig() failed: %v", err)
+	}
+
+	// 2. Test Close
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	// Verify idempotency on nil/closed DB
+	var emptyRepo BoltRepo
+	if err := emptyRepo.Close(); err != nil {
+		t.Errorf("Expected nil error when closing uninitialized repo, got: %v", err)
+	}
+}
+
+func TestBoltRepo_SavePigtime_And_Extractpigtime(t *testing.T) {
+	repo := setupTestRepo(t)
+	defer repo.Close()
+
+	// A fresh database has no timing history yet.
+	timesMap, err := repo.Extractpigtime()
+	if err != nil {
+		t.Fatalf("Extractpigtime() on a fresh database failed: %v", err)
+	}
+	if len(timesMap) != 0 {
+		t.Fatalf("Extractpigtime() on a fresh database = %v, want empty history", timesMap)
+	}
+
+	pig := &runners.Pig{
+		Run: []runners.TestResult{
+			{Testname: "TestDBConnect", Passed: true, Timetaken: 5 * time.Second},
+			{Testname: "TestDBClose", Passed: true, Timetaken: 50 * time.Millisecond},
+		},
+	}
+
+	// 2. Test SavePigtime
+	testName := "SuiteDatabase"
+	if err := repo.SavePigtime(testName, pig); err != nil {
+		t.Fatalf("SavePigtime() failed: %v", err)
+	}
+
+	// 3. Test Extractpigtime success path
+	timesMap, err = repo.Extractpigtime()
+	if err != nil {
+		t.Fatalf("Extractpigtime() failed unexpectedly: %v", err)
+	}
+
+	expectedKey0 := "SuiteDatabase_0"
+	expectedKey1 := "SuiteDatabase_1"
+
+	if val, ok := timesMap[expectedKey0]; !ok || val != (5*time.Second).Nanoseconds() {
+		t.Errorf("Expected %d ns for key %s, got %d", (5 * time.Second).Nanoseconds(), expectedKey0, val)
+	}
+
+	if val, ok := timesMap[expectedKey1]; !ok || val != (50*time.Millisecond).Nanoseconds() {
+		t.Errorf("Expected %d ns for key %s, got %d", (50 * time.Millisecond).Nanoseconds(), expectedKey1, val)
+	}
+}
+
+func TestBoltRepo_SaveAndExtractTimedOutTests(t *testing.T) {
+	repo := setupTestRepo(t)
+	defer repo.Close()
+
+	got, err := repo.ExtractTimedOutTests()
+	if err != nil || len(got) != 0 {
+		t.Fatalf("ExtractTimedOutTests() on empty repo = %v, %v; want empty map and no error", got, err)
+	}
+	if err := repo.SaveTimedOutTest("TestStalls"); err != nil {
+		t.Fatalf("SaveTimedOutTest() error = %v", err)
+	}
+	got, err = repo.ExtractTimedOutTests()
+	if err != nil {
+		t.Fatalf("ExtractTimedOutTests() error = %v", err)
+	}
+	if !got["TestStalls"] || len(got) != 1 {
+		t.Fatalf("ExtractTimedOutTests() = %v, want TestStalls excluded", got)
 	}
 }

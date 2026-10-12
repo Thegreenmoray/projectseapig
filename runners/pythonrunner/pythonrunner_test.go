@@ -23,8 +23,15 @@ func TestPythonListTests_Integration(t *testing.T) {
 	tester := Pythontester{
 		BinPath:  "pytest",
 		BaseArgs: []string{},
-		Timeout:  5 * time.Second,
+		Timeout:  15 * time.Second,
 	}
+	var progress []string
+	tester.SetDiscoveryProgress(func(completed, total int, item string) {
+		progress = append(progress, item)
+		if completed != len(progress) || total != -1 {
+			t.Errorf("unexpected discovery progress: completed=%d total=%d", completed, total)
+		}
+	})
 
 	tests, err := tester.ListTests(dir)
 	if err != nil {
@@ -39,18 +46,7 @@ func TestPythonListTests_Integration(t *testing.T) {
 	if len(tests) > 0 && !strings.Contains(tests[0], expectedTestName) {
 		t.Errorf("Expected test name to contain %q, got %q", expectedTestName, tests[0])
 	}
-}
-
-func TestPythonRunTest(t *testing.T) {
-	tester := Pythontester{
-		BinPath:  "pytest",
-		BaseArgs: []string{},
-		Timeout:  5 * time.Second,
-	}
-
-	result, _ := tester.RunTest("test_math.py::TestMath::test_add")
-
-	if result.Testname != "test_math.py::TestMath::test_add" {
-		t.Errorf("Expected test name, got %s", result.Testname)
+	if len(progress) != len(tests) {
+		t.Errorf("discovery progress reported %d tests, want %d", len(progress), len(tests))
 	}
 }
