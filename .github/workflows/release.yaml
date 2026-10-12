@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Run tests
+        run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            binary: seapig-windows-amd64.exe
+            package: seapig-windows-amd64.zip
+          - goos: darwin
+            goarch: arm64
+            binary: seapig-darwin-arm64
+            package: seapig-darwin-arm64.tar.gz
+          - goos: darwin
+            goarch: amd64
+            binary: seapig-darwin-amd64
+            package: seapig-darwin-amd64.tar.gz
+          - goos: linux
+            goarch: amd64
+            binary: seapig-linux-amd64
+            package: seapig-linux-amd64.tar.gz
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build and package executable
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist/package/servers
+          go build -trimpath -ldflags="-s -w" -o "dist/package/${{ matrix.binary }}" .
+          cp servers/Server.java servers/server.py servers/server.ts servers/package.json servers/package-lock.json dist/package/servers/
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            cd dist/package
+            zip -qr "../${{ matrix.package }}" .
+          else
+            tar -czf "dist/${{ matrix.package }}" -C dist/package .
+          fi
+
+      - name: Upload platform package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}
+          path: dist/${{ matrix.package }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: seapig-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
